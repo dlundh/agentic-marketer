@@ -121,6 +121,15 @@ export default function Page() {
     if (currentId) loadDetail(currentId);
   };
 
+  const revise = async (actionId: string, feedback: string) => {
+    const res = await fetch(`/api/actions/${actionId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'revise', feedback }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok && d.error) setError(d.error);
+    if (currentId) loadDetail(currentId);
+  };
+
   const optimize = async () => {
     if (!currentId) return;
     await fetch(`/api/projects/${currentId}/campaign`, {
@@ -173,6 +182,7 @@ export default function Page() {
                 campaign={detail.campaign}
                 actions={detail.actions}
                 onDecide={decide}
+                onRevise={revise}
                 onOptimize={optimize}
                 anyExecLive={detail.jobs.some((j) => j.phase === 'execution' && j.live)}
               />
@@ -422,11 +432,11 @@ const CH_LABEL: Record<string, string> = {
 const chLabel = (k: string) => CH_LABEL[k] || k;
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
-function CampaignPanel({ campaign, actions, onDecide, onOptimize, anyExecLive }: {
+function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, anyExecLive }: {
   campaign: Campaign; actions: ActionItem[]; onDecide: (id: string, a: 'approve' | 'reject') => void;
-  onOptimize: () => void; anyExecLive: boolean;
+  onRevise: (id: string, feedback: string) => void; onOptimize: () => void; anyExecLive: boolean;
 }) {
-  const proposed = actions.filter((a) => a.status === 'proposed');
+  const proposed = actions.filter((a) => ['proposed', 'revising'].includes(a.status));
   const live = actions.filter((a) => ['approved', 'done', 'ready'].includes(a.status));
   const rejected = actions.filter((a) => a.status === 'rejected' || a.status === 'failed');
   const pct = campaign.budget_cents > 0 ? Math.min(100, (campaign.spent_cents / campaign.budget_cents) * 100) : 0;
@@ -453,10 +463,10 @@ function CampaignPanel({ campaign, actions, onDecide, onOptimize, anyExecLive }:
       <div className="queue">
         <div className="queue-col-head">Needs your approval · {proposed.length}</div>
         {proposed.length === 0 && <div className="empty" style={{ padding: 18 }}>{anyExecLive ? 'Agents are still working…' : 'No actions waiting.'}</div>}
-        {proposed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} />)}
+        {proposed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} />)}
 
         {live.length > 0 && <div className="queue-col-head" style={{ marginTop: 18 }}>Approved & executed · {live.length}</div>}
-        {live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} />)}
+        {live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} />)}
 
         {rejected.length > 0 && <div className="note" style={{ fontSize: 12, marginTop: 14 }}>{rejected.length} rejected/failed.</div>}
       </div>
@@ -464,19 +474,26 @@ function CampaignPanel({ campaign, actions, onDecide, onOptimize, anyExecLive }:
   );
 }
 
-function ActionCard({ a, onDecide }: { a: ActionItem; onDecide: (id: string, x: 'approve' | 'reject') => void }) {
+function ActionCard({ a, onDecide, onRevise }: {
+  a: ActionItem; onDecide: (id: string, x: 'approve' | 'reject') => void; onRevise: (id: string, feedback: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState('');
   const meta = (() => { try { return a.meta ? JSON.parse(a.meta) : {}; } catch { return {}; } })();
+  const revisions: { feedback: string; ts: number }[] = meta.revisions || [];
+  const revising = a.status === 'revising';
   const copy = () => { navigator.clipboard?.writeText(a.content || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+  const send = () => { if (!feedback.trim()) return; onRevise(a.id, feedback.trim()); setFeedback(''); };
 
   return (
     <div className={`action a-${a.status}`}>
       <div className="action-head" onClick={() => setOpen(!open)}>
-        <span className={`act-status as-${a.status}`}>{a.status}</span>
+        <span className={`act-status as-${a.status}`}>{revising ? 'revising' : a.status}</span>
         <span className="job-kind kind-exec">{chLabel(a.channel)} · {a.kind}</span>
         {a.cost_cents > 0 && <span className="cost">{usd(a.cost_cents)}</span>}
         <div className="action-title">{a.title}</div>
+        {revisions.length > 0 && <span className="rev-count" title={`${revisions.length} revision(s)`}>✎{revisions.length}</span>}
         <span className="caret">{open ? '▾' : '▸'}</span>
       </div>
       {a.summary && <div className="action-sum">{a.summary}</div>}
@@ -492,15 +509,35 @@ function ActionCard({ a, onDecide }: { a: ActionItem; onDecide: (id: string, x: 
               <pre>{a.content}</pre>
             </div>
           )}
-          {a.result && <div className="kv"><b>Result</b> {a.result}</div>}
+          {revisions.length > 0 && (
+            <div className="kv"><b>Your feedback</b>
+              <ul className="rev-list">{revisions.map((r, i) => <li key={i}>{r.feedback}</li>)}</ul>
+            </div>
+          )}
+          {a.result && <div className="kv"><b>Note</b> {a.result}</div>}
         </div>
       )}
+
+      {revising && <div className="revising-bar"><span className="spin">⟳</span> Revising based on your feedback…</div>}
+
       {a.status === 'proposed' && (
-        <div className="action-actions">
-          <button className="approve" onClick={() => onDecide(a.id, 'approve')}>✓ Approve{a.cost_cents > 0 ? ` (${usd(a.cost_cents)})` : ''}</button>
-          <button className="reject" onClick={() => onDecide(a.id, 'reject')}>✕ Reject</button>
-        </div>
+        <>
+          <div className="action-actions">
+            <button className="approve" onClick={() => onDecide(a.id, 'approve')}>✓ Approve{a.cost_cents > 0 ? ` (${usd(a.cost_cents)})` : ''}</button>
+            <button className="reject" onClick={() => onDecide(a.id, 'reject')}>✕ Reject</button>
+          </div>
+          <div className="feedback">
+            <textarea
+              placeholder="Adjust this action — e.g. “punchier hook, mention the free tier, target designers, drop the emoji”…"
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); }}
+            />
+            <button className="revise-btn" onClick={send} disabled={!feedback.trim()}>↻ Revise</button>
+          </div>
+        </>
       )}
+
       {['ready', 'done'].includes(a.status) && a.result && <div className="action-result">{a.status === 'done' ? '✅ ' : '📋 '}{a.result}</div>}
     </div>
   );

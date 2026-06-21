@@ -248,6 +248,28 @@ a { color: var(--accent); }
 .reject { border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); font-weight: 600; padding: 8px 16px; border-radius: 9px; font-size: 13px; }
 .reject:hover { color: var(--red); border-color: rgba(240,107,107,.4); }
 .action-result { padding: 0 14px 12px; font-size: 12.5px; color: var(--muted); }
+.as-revising { background: rgba(124,124,240,.18); color: var(--accent); }
+.action.a-revising { border-color: rgba(124,124,240,.4); }
+.rev-count { font-size: 10px; font-weight: 700; color: var(--accent); background: rgba(124,124,240,.14); padding: 2px 6px; border-radius: 5px; }
+.rev-list { margin: 6px 0 0; padding-left: 16px; }
+.rev-list li { color: var(--text); font-size: 12.5px; line-height: 1.5; margin-bottom: 3px; }
+.revising-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); color: var(--accent); font-size: 13px; font-weight: 600; background: rgba(124,124,240,.06); }
+
+/* per-action feedback / revise box */
+.feedback { display: flex; gap: 8px; align-items: flex-end; padding: 0 14px 14px; }
+.feedback textarea {
+  flex: 1; min-height: 38px; max-height: 120px; resize: vertical; border: 1px solid var(--border);
+  background: var(--bg-soft); color: var(--text); border-radius: 10px; padding: 9px 11px; font-size: 13px;
+  font-family: inherit; line-height: 1.4; outline: none;
+}
+.feedback textarea:focus { border-color: var(--accent); }
+.feedback textarea::placeholder { color: var(--muted); }
+.revise-btn {
+  border: 1px solid rgba(124,124,240,.4); background: rgba(124,124,240,.12); color: var(--accent);
+  font-weight: 700; padding: 9px 14px; border-radius: 9px; font-size: 13px; white-space: nowrap;
+}
+.revise-btn:hover { background: rgba(124,124,240,.2); }
+.revise-btn:disabled { opacity: .4; cursor: not-allowed; }
 
 /* chips & channel grids */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }

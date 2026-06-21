@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs';
 import {
   DATA_DIR, uid, addActivity, addFinding, addFile, updateJob, updateProject,
   getProject, getJob, touchJob, getCampaignByProject, updateCampaign, createAction,
-  listFindings, type Job, type Project,
+  getAction, updateAction, listFindings, type Job, type Project, type ActionRow,
 } from './db';
 import { emitEvent } from './events';
 import { renderPdf, type PdfSection } from './pdf';
@@ -425,4 +425,83 @@ export async function runAgent(args: RunArgs): Promise<RunOutcome> {
   }
 
   return outcome;
+}
+
+// Revise a single proposed action from user feedback, then return it to the
+// approval queue. Focused single-purpose agent — not part of the swarm.
+export async function runRevision(opts: { action: ActionRow; feedback: string; abort: AbortController }): Promise<boolean> {
+  const { action, feedback, abort } = opts;
+  const project = getProject(action.project_id);
+  if (!project) return false;
+  const campaign = getCampaignByProject(action.project_id);
+  let updated = false;
+
+  const submit = tool(
+    'submit_revision',
+    'Save the revised action. Call exactly once with the full improved fields (write complete copy, not a diff).',
+    {
+      title: z.string(),
+      summary: z.string(),
+      content: z.string().describe('The full revised ready-to-publish copy'),
+      cost_usd: z.number().optional().describe('Updated estimated cost in USD, only if it changed'),
+      targeting: z.string().optional(),
+      subject: z.string().optional().describe('Email subject, if applicable'),
+      schedule: z.string().optional(),
+      rationale: z.string().optional(),
+    },
+    async (a) => {
+      const cur = getAction(action.id);
+      if (!cur) return { content: [{ type: 'text', text: 'Action no longer exists.' }], isError: true };
+      const meta = cur.meta ? JSON.parse(cur.meta) : {};
+      for (const k of ['targeting', 'subject', 'schedule', 'rationale'] as const) {
+        if ((a as any)[k] !== undefined) meta[k] = (a as any)[k];
+      }
+      const cost = a.cost_usd !== undefined ? Math.max(0, Math.round(a.cost_usd * 100)) : cur.cost_cents;
+      updateAction(action.id, {
+        title: a.title, summary: a.summary, content: a.content, cost_cents: cost,
+        meta: JSON.stringify(meta), status: 'proposed', result: null,
+      });
+      updated = true;
+      emitEvent({ type: 'finding', projectId: action.project_id });
+      return { content: [{ type: 'text', text: 'Revision saved; the action is back in the approval queue.' }] };
+    },
+  );
+
+  const server = createSdkMcpServer({ name: 'reviser', version: '1.0.0', tools: [submit] });
+  const meta = action.meta ? JSON.parse(action.meta) : {};
+  const budgetLine = campaign
+    ? `Budget cap $${(campaign.budget_cents / 100).toFixed(2)}, $${(campaign.spent_cents / 100).toFixed(2)} committed, $${((campaign.budget_cents - campaign.spent_cents) / 100).toFixed(2)} remaining.`
+    : 'Budget $0.';
+
+  const prompt = [
+    `You are refining ONE proposed marketing action based on the user's feedback. Keep it sharp, on-brand for this product, ETHICAL (no spam, fake engagement, deceptive or audience-annoying tactics), and within budget. ${budgetLine}`,
+    ``,
+    `PRODUCT: ${project.prompt}${project.url ? ` (${project.url})` : ''}`,
+    `CHANNEL: ${channelDef(action.channel).label} · ${action.kind}`,
+    `CURRENT TITLE: ${action.title}`,
+    `CURRENT SUMMARY: ${action.summary || ''}`,
+    meta.subject ? `CURRENT SUBJECT: ${meta.subject}` : '',
+    meta.targeting ? `CURRENT TARGETING: ${meta.targeting}` : '',
+    `CURRENT CONTENT:\n${action.content || '(none)'}`,
+    ``,
+    `USER FEEDBACK / ADJUSTMENT:\n${feedback}`,
+    ``,
+    `Apply the feedback: preserve what works, change what they ask for. If the feedback needs fresh facts, you may use web search. Then call submit_revision exactly once with the complete revised action.`,
+  ].filter(Boolean).join('\n');
+
+  const options: any = {
+    cwd: projectDir(project.id),
+    allowedTools: ['WebSearch', 'WebFetch', 'Read', 'mcp__reviser__submit_revision'],
+    disallowedTools: ['Bash', 'Write', 'Edit'],
+    permissionMode: 'bypassPermissions',
+    mcpServers: { reviser: server },
+    abortController: abort,
+    maxTurns: 14,
+  };
+  if (process.env.AGENT_MODEL) options.model = process.env.AGENT_MODEL;
+
+  for await (const _m of query({ prompt, options })) {
+    if (abort.signal.aborted) break;
+  }
+  return updated;
 }

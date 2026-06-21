@@ -1,11 +1,11 @@
 import {
   createProject, createJob, updateJob, getJob, getProject, updateProject, listJobs,
   listFindings, listAllActiveJobs, createCampaign, getCampaign, getCampaignByProject,
-  updateCampaign, getAction, updateAction, reserveSpend, refundSpend,
+  updateCampaign, getAction, updateAction, reserveSpend, refundSpend, resetStaleRevisions,
   type Job, type ActionRow,
 } from './db';
 import { emitEvent } from './events';
-import { runAgent, ROLE_LABELS } from './agent';
+import { runAgent, runRevision, ROLE_LABELS } from './agent';
 import { runAction, channelDef, CHANNELS } from './connectors';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +35,7 @@ export function reconcile() {
     const ref = job.status === 'running' ? beat : Math.max(beat, job.created_at);
     if (t - ref > STALE_MS) updateJob(job.id, { status: 'paused' });
   }
+  resetStaleRevisions(STALE_MS); // recover actions left mid-revise by a restart
 }
 
 function findingsText(projectId: string): string {
@@ -224,6 +225,30 @@ export async function approveAction(actionId: string): Promise<{ ok: boolean; er
     emitEvent({ type: 'finding', projectId: a.project_id });
   })();
   return { ok: true };
+}
+
+// Take user feedback on a proposed action, revise its content with an agent,
+// and return it to the approval queue.
+export function reviseAction(actionId: string, feedback: string): boolean {
+  const a = getAction(actionId);
+  if (!a || !feedback.trim()) return false;
+  if (!['proposed', 'ready', 'failed'].includes(a.status)) return false;
+  if (a.cost_cents > 0 && a.status === 'approved') return false; // don't touch reserved/executing
+  const meta = a.meta ? JSON.parse(a.meta) : {};
+  meta.revisions = [...(meta.revisions || []), { feedback: feedback.trim(), ts: Date.now() }];
+  updateAction(actionId, { meta: JSON.stringify(meta), status: 'revising', result: null });
+  emitEvent({ type: 'finding', projectId: a.project_id });
+  const abort = new AbortController();
+  (async () => {
+    try {
+      const ok = await runRevision({ action: getAction(actionId)!, feedback: feedback.trim(), abort });
+      if (!ok) updateAction(actionId, { status: 'proposed', result: 'Revision did not produce changes — please try rephrasing.' });
+    } catch (err: any) {
+      updateAction(actionId, { status: 'proposed', result: 'Revision error: ' + String(err?.message || err) });
+    }
+    emitEvent({ type: 'finding', projectId: a.project_id });
+  })();
+  return true;
 }
 
 export function rejectAction(actionId: string): boolean {
