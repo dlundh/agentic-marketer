@@ -455,6 +455,20 @@ const CH_LABEL: Record<string, string> = {
 const chLabel = (k: string) => CH_LABEL[k] || k;
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
+// Paste-ready answer for X's "describe all of your use cases" review field.
+const X_USECASE = `This app is a personal marketing assistant used by a single authenticated user to manage their own brand's presence on X.
+
+How we use the X API:
+1. Posting (tweet.write): We publish tweets and threads to the authenticated user's own account. Every post is written and explicitly approved by the user inside our app before it is sent — nothing is posted automatically or without human review.
+2. Account identification (users.read): On connection we call GET /2/users/me one time to confirm which account authorized the app and to display that handle back to the user.
+
+What we do NOT do:
+- We do not read, collect, store, or analyze other users' Tweets, profiles, or any X data.
+- We do not perform automated engagement (no auto-follow, auto-like, auto-reply) and we do not generate spam.
+- We do not display X content outside of X, and we do not aggregate, resell, or share any X data with third parties or government entities.
+
+Access tokens are stored only on the user's own machine and are used solely to post the user's own approved marketing content on their behalf. Posting volume is low — a handful of human-approved posts.`;
+
 // Turn bare URLs in agent-written text into clickable links.
 function linkify(text: string) {
   return text.split(/(https?:\/\/[^\s)]+)/g).map((p, i) =>
@@ -643,6 +657,22 @@ function LaunchModal({ onClose, onLaunch }: { onClose: () => void; onLaunch: (bu
   );
 }
 
+// Pre-filled, copy-paste answer for X's API use-case review question.
+function UseCaseBlock() {
+  const [copied, setCopied] = useState(false);
+  const copy = () => { navigator.clipboard?.writeText(X_USECASE); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+  return (
+    <div>
+      <div className="note" style={{ fontSize: 11.5, marginTop: 2 }}>X asks <b>“Describe all of your use cases of X’s data and API”</b> — paste this:</div>
+      <div className="action-content" style={{ marginTop: 6 }}>
+        <button className="copy" onClick={copy}>{copied ? '✓ Copied' : '⧉ Copy'}</button>
+        <pre style={{ maxHeight: 150, overflow: 'auto' }}>{X_USECASE}</pre>
+      </div>
+      <div className="note" style={{ fontSize: 11 }}>For the Yes/No questions (analyze X content, display Tweets off X, share data with government) answer <b>No</b>.</div>
+    </div>
+  );
+}
+
 // ----------------------------- Channels modal -------------------------------
 function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
   onClose: () => void; hasCampaign: boolean; hasProject: boolean; onCreate: (channel: string) => Promise<string | null>;
@@ -825,6 +855,7 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
                 <span style={{ wordBreak: 'break-all' }}>{redirectUri}</span>
                 <button className="mini" onClick={() => navigator.clipboard?.writeText(redirectUri)}>copy</button>
               </div>
+              {c.key === 'x' && <UseCaseBlock />}
               <a className="note" style={{ fontSize: 11.5 }} href={portal} target="_blank" rel="noreferrer">
                 {c.key === 'x' ? 'Open X developer portal ↗ — create an app, enable OAuth 2.0 (Web App / confidential), scopes incl. tweet.write' : 'Open Reddit apps ↗ — create a "web app", set the redirect URI above'}
               </a>
