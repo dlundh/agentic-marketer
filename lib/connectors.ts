@@ -107,7 +107,8 @@ const safeJSON = (s: string | null) => { try { return s ? JSON.parse(s) : null; 
 export async function runAction(action: ActionRow): Promise<{ status: 'done' | 'ready' | 'failed'; detail: string }> {
   // Account-setup tasks are always a human step — never auto-executed.
   if (action.kind === 'account') {
-    return { status: 'ready', detail: 'Brand-account kit ready. Follow the signup link to create the account, then Connect it under ⚙ Channels.' };
+    const url = safeJSON(action.meta)?.signup_url;
+    return { status: 'ready', detail: `Brand-account kit ready. Create the account${url ? ` at ${url}` : ' via the signup link below'}, then Connect it under ⚙ Channels.` };
   }
   const def = channelDef(action.channel);
   const emailish = def.executor === 'smtp' || ['email', 'outreach'].includes(action.kind);

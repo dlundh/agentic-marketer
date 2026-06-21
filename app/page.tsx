@@ -442,6 +442,15 @@ const CH_LABEL: Record<string, string> = {
 const chLabel = (k: string) => CH_LABEL[k] || k;
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
+// Turn bare URLs in agent-written text into clickable links.
+function linkify(text: string) {
+  return text.split(/(https?:\/\/[^\s)]+)/g).map((p, i) =>
+    /^https?:\/\//.test(p)
+      ? <a key={i} href={p} target="_blank" rel="noreferrer">{p}</a>
+      : <span key={i}>{p}</span>,
+  );
+}
+
 function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, anyExecLive }: {
   campaign: Campaign; actions: ActionItem[]; onDecide: (id: string, a: 'approve' | 'reject') => void;
   onRevise: (id: string, feedback: string) => void; onOptimize: () => void; anyExecLive: boolean;
@@ -507,6 +516,15 @@ function ActionCard({ a, onDecide, onRevise }: {
         <span className="caret">{open ? '▾' : '▸'}</span>
       </div>
       {a.summary && <div className="action-sum">{a.summary}</div>}
+
+      {meta.signup_url && (
+        <div className="signup-row">
+          <a className="signup-link" href={meta.signup_url} target="_blank" rel="noreferrer">▶ Open {chLabel(a.channel)} signup ↗</a>
+          {meta.handle && <span className="handle-pill">{String(meta.handle).startsWith('@') ? meta.handle : '@' + meta.handle}</span>}
+          <span className="note" style={{ fontSize: 11 }}>Expand for the full profile to paste →</span>
+        </div>
+      )}
+
       {open && (
         <div className="action-body">
           {meta.targeting && <div className="kv"><b>Targeting</b> {meta.targeting}</div>}
@@ -516,7 +534,7 @@ function ActionCard({ a, onDecide, onRevise }: {
           {a.content && (
             <div className="action-content">
               <button className="copy" onClick={copy}>{copied ? '✓ Copied' : '⧉ Copy'}</button>
-              <pre>{a.content}</pre>
+              <pre>{linkify(a.content)}</pre>
             </div>
           )}
           {revisions.length > 0 && (
@@ -548,7 +566,7 @@ function ActionCard({ a, onDecide, onRevise }: {
         </>
       )}
 
-      {['ready', 'done'].includes(a.status) && a.result && <div className="action-result">{a.status === 'done' ? '✅ ' : '📋 '}{a.result}</div>}
+      {['ready', 'done'].includes(a.status) && a.result && <div className="action-result">{a.status === 'done' ? '✅ ' : '📋 '}{linkify(a.result)}</div>}
     </div>
   );
 }
