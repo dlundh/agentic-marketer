@@ -51,7 +51,7 @@ Approved actions execute via the best connected **connector**:
 |----------|--------------|
 | **Automation webhook** | POSTs the action to your Zapier / Make / n8n / Buffer hook — the universal bridge to publish anywhere. |
 | **Email (SMTP)** | Really sends approved outreach/lifecycle email (opt-out footer added). |
-| **Native API (Mastodon)** | "Connect with Mastodon" runs a full OAuth flow — the app self-registers on your instance (no developer portal) and posts directly via the API, threading long copy automatically. No Zapier needed. |
+| **Native API (Mastodon / X / Reddit)** | OAuth "Connect" — the app posts directly via the official API, auto-threading long copy and refreshing expired tokens. Mastodon self-registers (no dev portal); X & Reddit need a one-time developer app (paste a client id/secret — the UI shows the exact redirect URI + portal link). Reddit posts need a target subreddit (the agent includes one, or add `r/...` to the action). No Zapier needed. |
 | **Manual / publish-ready** | No connector for that channel yet → the action is marked ready with copy-paste content. Nothing is faked as "posted". |
 
 Connectors are only marked **connected** after verification — a posting webhook is

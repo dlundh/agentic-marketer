@@ -1,10 +1,138 @@
+import { randomBytes, createHash } from 'node:crypto';
+
 // ---------------------------------------------------------------------------
-// Mastodon native integration. Mastodon is unique: a client can REGISTER ITSELF
-// on any instance via POST /api/v1/apps (no developer portal), then run a normal
-// OAuth2 code flow, then post via the API. So the app genuinely "creates the
-// trigger and uses it" — no Zapier, no manual setup.
+// Native OAuth + posting for Mastodon, X/Twitter, and Reddit.
+// Mastodon self-registers (no dev portal); X & Reddit need a one-time developer
+// app (client id/secret) supplied by the user. All three then run a standard
+// OAuth2 code flow and post directly via the platform API.
 // ---------------------------------------------------------------------------
 
+// Split text into word-bounded chunks for threading.
+export function chunkText(text: string, limit: number): string[] {
+  const clean = text.trim();
+  if (clean.length <= limit) return [clean];
+  const chunks: string[] = [];
+  let cur = '';
+  for (const w of clean.split(/\s+/)) {
+    if ((cur + ' ' + w).trim().length > limit) { if (cur) chunks.push(cur.trim()); cur = w; }
+    else cur = (cur + ' ' + w).trim();
+  }
+  if (cur) chunks.push(cur.trim());
+  return chunks;
+}
+
+export function pkce() {
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  return { verifier, challenge };
+}
+
+// ---- X / Twitter (OAuth2 + PKCE) ------------------------------------------
+const X_SCOPES = 'tweet.read tweet.write users.read offline.access';
+
+export function xAuthorizeUrl(clientId: string, redirectUri: string, state: string, challenge: string): string {
+  const q = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: redirectUri, scope: X_SCOPES, state, code_challenge: challenge, code_challenge_method: 'S256' });
+  return `https://twitter.com/i/oauth2/authorize?${q.toString()}`;
+}
+function xAuthHeader(clientId: string, clientSecret?: string): Record<string, string> {
+  return clientSecret ? { Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64') } : {};
+}
+export async function exchangeXCode(clientId: string, clientSecret: string, code: string, redirectUri: string, verifier: string) {
+  const res = await fetch('https://api.twitter.com/2/oauth2/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...xAuthHeader(clientId, clientSecret) },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, code_verifier: verifier, client_id: clientId }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`X token exchange failed (HTTP ${res.status}): ${(await res.text()).slice(0, 140)}`);
+  const j: any = await res.json();
+  return { access_token: j.access_token, refresh_token: j.refresh_token };
+}
+export async function refreshX(clientId: string, clientSecret: string, refreshToken: string) {
+  const res = await fetch('https://api.twitter.com/2/oauth2/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...xAuthHeader(clientId, clientSecret) },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`X token refresh failed (HTTP ${res.status})`);
+  const j: any = await res.json();
+  return { access_token: j.access_token, refresh_token: j.refresh_token || refreshToken };
+}
+export async function verifyXAccount(token: string): Promise<{ handle: string; url: string }> {
+  const res = await fetch('https://api.twitter.com/2/users/me', { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`X verify failed (HTTP ${res.status})`);
+  const j: any = await res.json();
+  return { handle: j.data?.username, url: j.data?.username ? `https://x.com/${j.data.username}` : '' };
+}
+export async function postX(token: string, text: string): Promise<{ url: string; count: number }> {
+  const chunks = chunkText(text, 270);
+  let replyTo: string | undefined; let firstId = '';
+  for (let i = 0; i < chunks.length; i++) {
+    const payload: any = { text: chunks.length > 1 ? `${chunks[i]} (${i + 1}/${chunks.length})` : chunks[i] };
+    if (replyTo) payload.reply = { in_reply_to_tweet_id: replyTo };
+    const res = await fetch('https://api.twitter.com/2/tweets', {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload), signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) throw new Error(`X post failed (HTTP ${res.status}): ${(await res.text()).slice(0, 140)}`);
+    const j: any = await res.json();
+    if (i === 0) firstId = j.data?.id;
+    replyTo = j.data?.id;
+  }
+  return { url: firstId ? `https://x.com/i/web/status/${firstId}` : '', count: chunks.length };
+}
+
+// ---- Reddit (OAuth2) -------------------------------------------------------
+const REDDIT_SCOPES = 'identity submit read';
+const REDDIT_UA = 'web:agentic-marketer:1.0 (marketing assistant)';
+
+export function redditAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {
+  const q = new URLSearchParams({ client_id: clientId, response_type: 'code', state, redirect_uri: redirectUri, duration: 'permanent', scope: REDDIT_SCOPES });
+  return `https://www.reddit.com/api/v1/authorize?${q.toString()}`;
+}
+function redditAuth(clientId: string, clientSecret: string) {
+  return 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+}
+export async function exchangeRedditCode(clientId: string, clientSecret: string, code: string, redirectUri: string) {
+  const res = await fetch('https://www.reddit.com/api/v1/access_token', {
+    method: 'POST', headers: { Authorization: redditAuth(clientId, clientSecret), 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': REDDIT_UA },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Reddit token exchange failed (HTTP ${res.status})`);
+  const j: any = await res.json();
+  return { access_token: j.access_token, refresh_token: j.refresh_token };
+}
+export async function refreshReddit(clientId: string, clientSecret: string, refreshToken: string) {
+  const res = await fetch('https://www.reddit.com/api/v1/access_token', {
+    method: 'POST', headers: { Authorization: redditAuth(clientId, clientSecret), 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': REDDIT_UA },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Reddit token refresh failed (HTTP ${res.status})`);
+  const j: any = await res.json();
+  return { access_token: j.access_token, refresh_token: refreshToken };
+}
+export async function verifyRedditAccount(token: string): Promise<{ handle: string; url: string }> {
+  const res = await fetch('https://oauth.reddit.com/api/v1/me', { headers: { Authorization: `Bearer ${token}`, 'User-Agent': REDDIT_UA }, signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`Reddit verify failed (HTTP ${res.status})`);
+  const j: any = await res.json();
+  return { handle: j.name, url: `https://reddit.com/u/${j.name}` };
+}
+export async function postReddit(token: string, subreddit: string, title: string, text: string): Promise<{ url: string }> {
+  const sr = subreddit.replace(/^\/?r\//i, '').replace(/^\/+/, '');
+  const res = await fetch('https://oauth.reddit.com/api/submit', {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': REDDIT_UA },
+    body: new URLSearchParams({ sr, kind: 'self', title: title.slice(0, 300), text: text || '', api_type: 'json' }),
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error(`Reddit submit failed (HTTP ${res.status}): ${(await res.text()).slice(0, 140)}`);
+  const j: any = await res.json();
+  const errs = j?.json?.errors;
+  if (errs && errs.length) throw new Error(`Reddit: ${JSON.stringify(errs[0])}`);
+  return { url: j?.json?.data?.url || '' };
+}
+
+// ---- Mastodon (self-registering) ------------------------------------------
 const SCOPES = 'read write';
 
 export function normalizeInstance(input: string): string {

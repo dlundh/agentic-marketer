@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import { getConnector, upsertConnector, type ActionRow, type Connector } from './db';
-import { postMastodon } from './oauth';
+import { postMastodon, postX, refreshX, postReddit, refreshReddit } from './oauth';
 
 // ---------------------------------------------------------------------------
 // Channel catalog + execution adapters.
@@ -104,6 +104,29 @@ async function postWebhook(url: string, action: ActionRow): Promise<{ status: st
 
 const safeJSON = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
+// Find the target subreddit for a Reddit action (meta, targeting, or content).
+function subredditOf(action: ActionRow): string | null {
+  const meta = safeJSON(action.meta) || {};
+  if (meta.subreddit) return String(meta.subreddit).replace(/^\/?r\//i, '');
+  const m = `${meta.targeting || ''} ${action.title} ${action.content || ''}`.match(/\br\/([A-Za-z0-9_]{2,30})\b/);
+  return m ? m[1] : null;
+}
+
+// Run a post; on auth failure, refresh the token once, persist it, and retry.
+async function withRefresh(channel: string, secrets: any, label: string, doPost: (token: string) => Promise<any>) {
+  try {
+    return await doPost(secrets.access_token);
+  } catch (e) {
+    if (!secrets.refresh_token) throw e;
+    const t = channel === 'x'
+      ? await refreshX(secrets.client_id, secrets.client_secret, secrets.refresh_token)
+      : await refreshReddit(secrets.client_id, secrets.client_secret, secrets.refresh_token);
+    const merged = { ...secrets, ...t };
+    upsertConnector({ key: channel, label, executor: channel, connected: true, secrets: merged });
+    return await doPost(merged.access_token);
+  }
+}
+
 // Verify a posting webhook by sending a clearly-marked test ping. We only mark a
 // connector "connected" if it actually works — no fake "connected" states.
 export async function pingWebhook(url: string): Promise<{ ok: boolean; message: string }> {
@@ -150,11 +173,21 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
   const hook = getConnector('webhook');
 
   try {
-    // Native API adapter: post directly via the platform (no webhook needed).
+    // Native API adapters: post directly via the platform (no webhook needed).
+    const text = (action.content || action.summary || action.title || '').trim();
     if (action.channel === 'mastodon' && ownSecrets?.access_token && ownSecrets?.instance) {
-      const text = (action.content || action.summary || action.title || '').trim();
       const r = await postMastodon(ownSecrets.instance, ownSecrets.access_token, text);
       return { status: 'done', detail: `Posted to Mastodon${ownSecrets.handle ? ` as @${ownSecrets.handle}` : ''}${r.count > 1 ? ` (${r.count}-post thread)` : ''}: ${r.url}` };
+    }
+    if (action.channel === 'x' && ownSecrets?.access_token) {
+      const r = await withRefresh('x', ownSecrets, def.label, (tok) => postX(tok, text));
+      return { status: 'done', detail: `Posted to X${ownSecrets.handle ? ` as @${ownSecrets.handle}` : ''}${r.count > 1 ? ` (${r.count}-tweet thread)` : ''}: ${r.url}` };
+    }
+    if (action.channel === 'reddit' && ownSecrets?.access_token) {
+      const sub = subredditOf(action);
+      if (!sub) return { status: 'ready', detail: 'Approved — add a target subreddit (e.g. r/IndieMusic) to this action, then it can auto-post.' };
+      const r = await withRefresh('reddit', ownSecrets, def.label, (tok) => postReddit(tok, sub, action.title, action.content || ''));
+      return { status: 'done', detail: `Posted to r/${sub}: ${r.url}` };
     }
     if (emailish && smtp?.connected) return await sendEmail(smtp, action) as any;
     // A channel connected with its own posting webhook takes precedence.

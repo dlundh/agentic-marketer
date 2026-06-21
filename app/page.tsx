@@ -41,12 +41,15 @@ export default function Page() {
   const [showLaunch, setShowLaunch] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Handle the Mastodon OAuth round-trip return.
+  // Handle the OAuth round-trip return (mastodon | x | reddit).
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search).get('mastodon');
-    if (p === 'connected') { setNotice('✅ Mastodon connected — approved Mastodon posts will now publish to your account automatically.'); setShowChannels(true); }
-    else if (p === 'error') setError('Mastodon connection failed or was cancelled. Please try again.');
-    if (p) window.history.replaceState({}, '', window.location.pathname);
+    const q = new URLSearchParams(window.location.search);
+    const provider = q.get('oauth'); const status = q.get('status');
+    const label = ({ mastodon: 'Mastodon', x: 'X / Twitter', reddit: 'Reddit' } as any)[provider || ''] || provider;
+    if (provider === null) return;
+    if (status === 'connected') { setNotice(`✅ ${label} connected — approved ${label} posts will now publish to your account automatically.`); setShowChannels(true); }
+    else setError(`${label} connection failed or was cancelled. Please try again.`);
+    window.history.replaceState({}, '', window.location.pathname);
   }, []);
 
   // ---- data loaders ----
@@ -756,12 +759,17 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState<string | null>(null);
   const [instance, setInstance] = useState('mastodon.social');
+  const [cid, setCid] = useState('');
+  const [csec, setCsec] = useState('');
+  const isOAuth = ['mastodon', 'x', 'reddit'].includes(c.key);
+  const redirectUri = (typeof window !== 'undefined' ? window.location.origin : '') + `/api/oauth/${c.key}/callback`;
+  const portal = c.key === 'x' ? 'https://developer.twitter.com/en/portal/dashboard' : 'https://www.reddit.com/prefs/apps';
 
-  const startMastodon = async () => {
+  const startOAuth = async (payload: any) => {
     setBusy(true); setMsg(null);
-    const r = await fetch('/api/oauth/mastodon/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance }) })
+    const r = await fetch(`/api/oauth/${c.key}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       .then((x) => x.json()).catch(() => ({ error: 'Could not start.' }));
-    if (r.url) { window.location.href = r.url; } // redirect to instance OAuth consent
+    if (r.url) { window.location.href = r.url; } // redirect to the platform's OAuth consent
     else { setBusy(false); setMsg(r.error || 'Could not start.'); }
   };
 
@@ -800,13 +808,33 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
         </div>
       </div>
       {createMsg && <div className="chan-msg">{createMsg}</div>}
-      {open && !c.connected && (c.key === 'mastodon' ? (
+      {open && !c.connected && (isOAuth ? (
         <div className="chan-form">
-          <div className="note" style={{ fontSize: 11.5 }}>Connect your <b>existing</b> Mastodon account — no new signup, no phone. We register the app on your instance and post directly via the official API.</div>
-          <input className="field" placeholder="your instance, e.g. mastodon.social" value={instance} onChange={(e) => setInstance(e.target.value)} />
-          <button className="approve" onClick={startMastodon} disabled={busy || !instance.trim()}>
-            {busy ? <span className="spin">⟳</span> : 'Connect with Mastodon ↗'}
-          </button>
+          {c.key === 'mastodon' ? (
+            <>
+              <div className="note" style={{ fontSize: 11.5 }}>Connect your <b>existing</b> Mastodon account — no new signup, no phone. We register the app on your instance and post directly via the official API.</div>
+              <input className="field" placeholder="your instance, e.g. mastodon.social" value={instance} onChange={(e) => setInstance(e.target.value)} />
+              <button className="approve" onClick={() => startOAuth({ instance })} disabled={busy || !instance.trim()}>
+                {busy ? <span className="spin">⟳</span> : 'Connect with Mastodon ↗'}
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="note" style={{ fontSize: 11.5 }}>One-time setup: create a developer app, set its <b>redirect / callback URI</b> to the value below, then paste the keys. After that it's one-click.</div>
+              <div className="codeline" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                <span style={{ wordBreak: 'break-all' }}>{redirectUri}</span>
+                <button className="mini" onClick={() => navigator.clipboard?.writeText(redirectUri)}>copy</button>
+              </div>
+              <a className="note" style={{ fontSize: 11.5 }} href={portal} target="_blank" rel="noreferrer">
+                {c.key === 'x' ? 'Open X developer portal ↗ — create an app, enable OAuth 2.0 (Web App / confidential), scopes incl. tweet.write' : 'Open Reddit apps ↗ — create a "web app", set the redirect URI above'}
+              </a>
+              <input className="field" placeholder="Client ID" value={cid} onChange={(e) => setCid(e.target.value)} />
+              <input className="field" type="password" placeholder="Client Secret" value={csec} onChange={(e) => setCsec(e.target.value)} />
+              <button className="approve" onClick={() => startOAuth({ client_id: cid.trim(), client_secret: csec.trim() })} disabled={busy || !cid.trim() || !csec.trim()}>
+                {busy ? <span className="spin">⟳</span> : `Connect with ${c.label} ↗`}
+              </button>
+            </>
+          )}
           {msg && <div className="note" style={{ fontSize: 11.5 }}>{msg}</div>}
         </div>
       ) : (
