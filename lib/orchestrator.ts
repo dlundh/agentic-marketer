@@ -5,7 +5,7 @@ import {
   type Job, type ActionRow,
 } from './db';
 import { emitEvent } from './events';
-import { runAgent, runRevision, ROLE_LABELS } from './agent';
+import { runAgent, runRevision, runAccountKit, ROLE_LABELS } from './agent';
 import { runAction, channelDef, CHANNELS } from './connectors';
 
 // ---------------------------------------------------------------------------
@@ -193,6 +193,19 @@ function spawnSpecialists(projectId: string) {
     emitEvent({ type: 'job', projectId, jobId: job.id });
     drive(job); // specialists run concurrently
   }
+}
+
+// Prepare a name-matched brand account for a channel (agent does availability +
+// profile kit + signup steps; the human finalizes). Lands in the action queue.
+export function createAccountKit(projectId: string, channel: string): { ok: boolean; error?: string } {
+  const campaign = getCampaignByProject(projectId);
+  if (!campaign) return { ok: false, error: 'Launch a campaign first — account-setup tasks appear in your action queue.' };
+  const abort = new AbortController();
+  (async () => {
+    try { await runAccountKit({ projectId, channel, abort }); } catch { /* surfaced as no new action */ }
+    emitEvent({ type: 'finding', projectId });
+  })();
+  return { ok: true };
 }
 
 // Spin up the optimizer on demand (after some actions exist / have run).

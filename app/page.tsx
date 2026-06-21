@@ -138,6 +138,16 @@ export default function Page() {
     loadDetail(currentId);
   };
 
+  const createAccount = async (channel: string): Promise<string | null> => {
+    if (!currentId) return 'Open a project first.';
+    const res = await fetch(`/api/projects/${currentId}/account`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel }),
+    });
+    const d = await res.json().catch(() => ({}));
+    loadDetail(currentId);
+    return res.ok ? null : (d.error || 'Failed.');
+  };
+
   const modalJob = detail?.jobs.find((j) => j.id === modalJobId) || null;
 
   return (
@@ -229,7 +239,7 @@ export default function Page() {
         />
       )}
       {showConnect && <ConnectModal auth={auth} onClose={() => setShowConnect(false)} reload={loadAuth} />}
-      {showChannels && <ChannelsModal onClose={() => setShowChannels(false)} />}
+      {showChannels && <ChannelsModal onClose={() => setShowChannels(false)} hasCampaign={!!detail?.campaign} hasProject={!!currentId} onCreate={createAccount} />}
       {showLaunch && detail && <LaunchModal onClose={() => setShowLaunch(false)} onLaunch={launchCampaign} />}
     </>
   );
@@ -603,7 +613,9 @@ function LaunchModal({ onClose, onLaunch }: { onClose: () => void; onLaunch: (bu
 }
 
 // ----------------------------- Channels modal -------------------------------
-function ChannelsModal({ onClose }: { onClose: () => void }) {
+function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
+  onClose: () => void; hasCampaign: boolean; hasProject: boolean; onCreate: (channel: string) => Promise<string | null>;
+}) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [hook, setHook] = useState('');
   const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', from: '' });
@@ -664,22 +676,79 @@ function ChannelsModal({ onClose }: { onClose: () => void }) {
 
           <div className="kgroup">
             <h4>Channels</h4>
-            <p className="note">How each approved action will execute. Connected accounts auto-run; the rest are publish-ready.</p>
-            <div className="chan-grid">
-              {others.map((c) => {
-                const auto = c.connected || (c.executor === 'webhook' && webhookOn) || (c.executor === 'smtp' && smtpOn);
-                return (
-                  <div key={c.key} className="chan-row">
-                    <span className={`pip2 ${auto ? 'on' : ''}`} />
-                    <span className="cn">{c.label}{c.paid ? ' 💲' : ''}</span>
-                    <span className="cx">{auto ? (c.connected ? 'connected' : c.executor === 'smtp' ? 'via SMTP' : 'via webhook') : c.executor === 'manual' ? 'publish-ready' : 'not connected'}</span>
-                  </div>
-                );
-              })}
+            <p className="note">
+              <b>Connect</b> an account so approved actions auto-execute, or let the swarm <b>Create</b> a name-matched
+              brand account: an agent checks handle availability, writes your profile, and hands you a one-click signup
+              link to finish (platforms require human verification, so the final step is yours).
+            </p>
+            <div className="chan-list">
+              {others.map((c) => (
+                <ChannelRow
+                  key={c.key} c={c} webhookOn={!!webhookOn} smtpOn={!!smtpOn}
+                  hasCampaign={hasCampaign} hasProject={hasProject}
+                  onConnect={connect} onDisconnect={disconnect} onCreate={onCreate}
+                />
+              ))}
             </div>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, onDisconnect, onCreate }: {
+  c: Channel; webhookOn: boolean; smtpOn: boolean; hasCampaign: boolean; hasProject: boolean;
+  onConnect: (key: string, secrets: any) => void; onDisconnect: (key: string) => void;
+  onCreate: (channel: string) => Promise<string | null>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ handle: '', token: '', url: '' });
+  const [creating, setCreating] = useState(false);
+  const [createMsg, setCreateMsg] = useState<string | null>(null);
+
+  const auto = c.connected || (c.executor === 'webhook' && webhookOn) || (c.executor === 'smtp' && smtpOn);
+  const statusText = c.connected ? 'connected' : (c.executor === 'webhook' && webhookOn) ? 'via webhook'
+    : (c.executor === 'smtp' && smtpOn) ? 'via SMTP' : c.executor === 'manual' ? 'publish-ready' : 'not connected';
+
+  const save = () => {
+    if (!f.handle && !f.token && !f.url) return;
+    onConnect(c.key, { handle: f.handle || undefined, token: f.token || undefined, url: f.url || undefined });
+    setOpen(false); setF({ handle: '', token: '', url: '' });
+  };
+  const create = async () => {
+    setCreating(true); setCreateMsg(null);
+    const err = await onCreate(c.key);
+    setCreating(false);
+    setCreateMsg(err ? `⚠ ${err}` : '✓ Agent is preparing it — check your action queue.');
+    setTimeout(() => setCreateMsg(null), 6000);
+  };
+
+  return (
+    <div className="chan-item">
+      <div className="chan-main">
+        <span className={`pip2 ${c.connected ? 'on' : auto ? 'auto' : ''}`} />
+        <span className="cn">{c.label}{c.paid ? ' 💲' : ''}</span>
+        <span className="cx">{statusText}</span>
+        <div className="chan-btns">
+          <button className="mini" disabled={!hasProject || !hasCampaign || creating} title={!hasProject ? 'Open a project first' : !hasCampaign ? 'Launch a campaign first' : 'Agent prepares a name-matched account'} onClick={create}>
+            {creating ? <span className="spin">⟳</span> : '✨'} Create
+          </button>
+          {c.connected
+            ? <button className="mini danger" onClick={() => onDisconnect(c.key)}>Disconnect</button>
+            : <button className="mini" onClick={() => setOpen(!open)}>{open ? 'Cancel' : 'Connect'}</button>}
+        </div>
+      </div>
+      {createMsg && <div className="chan-msg">{createMsg}</div>}
+      {open && !c.connected && (
+        <div className="chan-form">
+          <input className="field" placeholder="@handle / username (optional)" value={f.handle} onChange={(e) => setF({ ...f, handle: e.target.value })} />
+          <input className="field" placeholder="API key / access token (optional)" value={f.token} onChange={(e) => setF({ ...f, token: e.target.value })} />
+          <input className="field" placeholder="Posting webhook URL for this channel (optional)" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} />
+          <button className="approve" onClick={save} disabled={!f.handle && !f.token && !f.url}>Save & connect</button>
+          <div className="note" style={{ fontSize: 11 }}>Tip: a per-channel webhook URL routes this channel's approved actions straight to your automation.</div>
+        </div>
+      )}
     </div>
   );
 }

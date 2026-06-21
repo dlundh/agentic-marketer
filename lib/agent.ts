@@ -505,3 +505,90 @@ export async function runRevision(opts: { action: ActionRow; feedback: string; a
   }
   return updated;
 }
+
+// Prepare a name-matched brand account for a channel: check handle availability,
+// write the profile kit, and hand the human a one-click signup link + steps.
+// We never auto-create accounts — platforms require human verification.
+export async function runAccountKit(opts: { projectId: string; channel: string; abort: AbortController }): Promise<boolean> {
+  const { projectId, channel, abort } = opts;
+  const project = getProject(projectId);
+  const campaign = getCampaignByProject(projectId);
+  if (!project || !campaign) return false;
+  const def = channelDef(channel);
+  let created = false;
+
+  const submit = tool(
+    'submit_account_kit',
+    'Save the prepared brand-account setup as an action for the user to finalize. Call exactly once.',
+    {
+      handle: z.string().describe('Best AVAILABLE name-matched @handle/username'),
+      fallback_handles: z.array(z.string()).optional().describe('Alternatives if the first is taken'),
+      availability_note: z.string().optional().describe('What you found about availability'),
+      display_name: z.string(),
+      bio: z.string().describe('Profile/bio/about text optimized for this platform'),
+      link: z.string().optional(),
+      profile_image_brief: z.string().optional(),
+      banner_brief: z.string().optional(),
+      signup_url: z.string().describe('Official signup URL for this platform'),
+      steps: z.string().describe('Step-by-step instructions for the human to create AND verify the account'),
+    },
+    async (a) => {
+      const content = [
+        `BRAND ACCOUNT SETUP — ${def.label}`,
+        ``,
+        `Recommended handle: ${a.handle}`,
+        a.fallback_handles?.length ? `Alternatives: ${a.fallback_handles.join(', ')}` : '',
+        a.availability_note ? `Availability: ${a.availability_note}` : '',
+        `Display name: ${a.display_name}`,
+        ``,
+        `Bio / About:\n${a.bio}`,
+        a.link ? `\nLink: ${a.link}` : '',
+        a.profile_image_brief ? `\nProfile image: ${a.profile_image_brief}` : '',
+        a.banner_brief ? `Banner image: ${a.banner_brief}` : '',
+        ``,
+        `▶ Create the account here: ${a.signup_url}`,
+        ``,
+        `Steps:\n${a.steps}`,
+      ].filter(Boolean).join('\n');
+      createAction({
+        project_id: projectId, campaign_id: campaign.id, channel, kind: 'account',
+        title: `Set up ${def.label}: ${a.handle}`,
+        summary: 'Name-matched brand account — ready for you to create & connect.',
+        content, cost_cents: 0, meta: { handle: a.handle, signup_url: a.signup_url, account_setup: true },
+      });
+      created = true;
+      emitEvent({ type: 'finding', projectId });
+      return { content: [{ type: 'text', text: 'Account-setup kit queued for approval.' }] };
+    },
+  );
+
+  const server = createSdkMcpServer({ name: 'accounts', version: '1.0.0', tools: [submit] });
+  const prompt = [
+    `You are preparing a brand account for this product on ${def.label}, matching the product/service name.`,
+    `IMPORTANT: do NOT attempt to create the account yourself. Every major platform requires human verification (email/phone/CAPTCHA) and bans bot-created accounts. Your job is to make the human's signup one-click and on-brand, fully within platform ToS.`,
+    ``,
+    `PRODUCT: ${project.prompt}${project.url ? ` (${project.url})` : ''}`,
+    `Brand name to match: ${project.title}`,
+    ``,
+    `1. Use web search to check whether the brand name is available as a handle on ${def.label}; suggest close fallbacks if it's taken.`,
+    `2. Write a platform-appropriate display name, bio/about, a link, and short briefs for the profile + banner images.`,
+    `3. Give the official signup URL and clear step-by-step instructions, including the verification the human must complete.`,
+    `Then call submit_account_kit once.`,
+  ].join('\n');
+
+  const options: any = {
+    cwd: projectDir(project.id),
+    allowedTools: ['WebSearch', 'WebFetch', 'mcp__accounts__submit_account_kit'],
+    disallowedTools: ['Bash', 'Write', 'Edit'],
+    permissionMode: 'bypassPermissions',
+    mcpServers: { accounts: server },
+    abortController: abort,
+    maxTurns: 14,
+  };
+  if (process.env.AGENT_MODEL) options.model = process.env.AGENT_MODEL;
+
+  for await (const _m of query({ prompt, options })) {
+    if (abort.signal.aborted) break;
+  }
+  return created;
+}

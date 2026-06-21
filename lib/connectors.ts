@@ -101,22 +101,26 @@ async function postWebhook(url: string, action: ActionRow): Promise<{ status: st
   return { status: 'done', detail: `Handed to automation webhook (HTTP ${res.status}). Your automation will publish it.` };
 }
 
+const safeJSON = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
+
 // Execute an approved action via the best available connected executor.
 export async function runAction(action: ActionRow): Promise<{ status: 'done' | 'ready' | 'failed'; detail: string }> {
+  // Account-setup tasks are always a human step — never auto-executed.
+  if (action.kind === 'account') {
+    return { status: 'ready', detail: 'Brand-account kit ready. Follow the signup link to create the account, then Connect it under ⚙ Channels.' };
+  }
   const def = channelDef(action.channel);
   const emailish = def.executor === 'smtp' || ['email', 'outreach'].includes(action.kind);
   const own = getConnector(action.channel);
+  const ownSecrets = own?.connected ? safeJSON(own.secrets) : null;
   const smtp = getConnector('smtp');
   const hook = getConnector('webhook');
 
   try {
     if (emailish && smtp?.connected) return await sendEmail(smtp, action) as any;
-    if (own?.connected && own.executor === 'webhook' && own.secrets) {
-      return await postWebhook(JSON.parse(own.secrets).url, action) as any;
-    }
-    if (hook?.connected && hook.secrets) {
-      return await postWebhook(JSON.parse(hook.secrets).url, action) as any;
-    }
+    // A channel connected with its own posting webhook takes precedence.
+    if (ownSecrets?.url) return await postWebhook(ownSecrets.url, action) as any;
+    if (hook?.connected) { const h = safeJSON(hook.secrets); if (h?.url) return await postWebhook(h.url, action) as any; }
     return { status: 'ready', detail: 'Approved and publish-ready. Connect this channel or the automation webhook to auto-execute.' };
   } catch (e: any) {
     return { status: 'failed', detail: String(e?.message || e) };
