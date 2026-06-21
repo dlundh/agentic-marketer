@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { listConnectors, upsertConnector, disconnectConnector, getConnector } from '@/lib/db';
-import { CHANNELS, seedConnectors, channelDef } from '@/lib/connectors';
+import { listConnectors, upsertConnector, disconnectConnector } from '@/lib/db';
+import { CHANNELS, seedConnectors, channelDef, pingWebhook, verifySmtp } from '@/lib/connectors';
 
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 // List the channel catalog with connection status (secrets never returned).
 export async function GET() {
@@ -19,7 +20,10 @@ export async function GET() {
   return NextResponse.json({ connectors });
 }
 
-// Connect or disconnect a channel. Body: { key, connect: bool, secrets?: {...} }
+// Connect / disconnect. We VERIFY before marking connected — a connector only
+// counts as connected if it has something we can actually execute with
+// (a working posting webhook, or authenticating SMTP). A bare handle/token is
+// stored as a note but does NOT auto-execute.
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const key = String(body.key || '');
@@ -28,8 +32,25 @@ export async function POST(req: Request) {
 
   if (body.connect === false) {
     disconnectConnector(key);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, connected: false, message: 'Disconnected.' });
   }
-  upsertConnector({ key, label: def.label, executor: def.executor, secrets: body.secrets || {}, connected: true });
-  return NextResponse.json({ ok: true });
+
+  const secrets = body.secrets || {};
+  let connected = false;
+  let message = '';
+
+  if (key === 'smtp') {
+    const v = await verifySmtp(secrets);
+    connected = v.ok; message = v.message;
+  } else if (secrets.url) {
+    const v = await pingWebhook(secrets.url);
+    connected = v.ok; message = v.message;
+  } else {
+    // Only a handle/token was given — nothing we can post with.
+    message = 'Saved. This channel stays publish-ready (copy/paste) until you add a posting webhook URL (Zapier / Make / Buffer / n8n) or connect SMTP for email.';
+  }
+
+  const executor = connected ? (key === 'smtp' ? 'smtp' : 'webhook') : def.executor;
+  upsertConnector({ key, label: def.label, executor, secrets, connected });
+  return NextResponse.json({ ok: connected || !secrets.url, connected, message });
 }

@@ -641,14 +641,19 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
   const load = () => fetch('/api/connectors').then((r) => r.json()).then((d) => setChannels(d.connectors));
   useEffect(() => { load(); }, []);
 
-  const connect = async (key: string, secrets: any) => {
-    await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, connect: true, secrets }) });
-    load();
+  const connect = async (key: string, secrets: any): Promise<{ connected: boolean; message: string }> => {
+    const r = await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, connect: true, secrets }) })
+      .then((x) => x.json()).catch(() => ({ connected: false, message: 'Request failed.' }));
+    await load();
+    return r;
   };
   const disconnect = async (key: string) => {
     await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, connect: false }) });
     load();
   };
+
+  const [hookBusy, setHookBusy] = useState(false); const [hookMsg, setHookMsg] = useState<string | null>(null);
+  const [smtpBusy, setSmtpBusy] = useState(false); const [smtpMsg, setSmtpMsg] = useState<string | null>(null);
 
   const webhookOn = channels.find((c) => c.key === 'webhook')?.connected;
   const smtpOn = channels.find((c) => c.key === 'smtp')?.connected;
@@ -668,10 +673,17 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
             {webhookOn ? (
               <button className="reject" onClick={() => disconnect('webhook')}>Disconnect</button>
             ) : (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input className="field" style={{ marginTop: 0 }} placeholder="https://hooks.zapier.com/…" value={hook} onChange={(e) => setHook(e.target.value)} />
-                <button className="approve" disabled={!hook.trim()} onClick={() => connect('webhook', { url: hook.trim() })}>Connect</button>
-              </div>
+              <>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input className="field" style={{ marginTop: 0 }} placeholder="https://hooks.zapier.com/…" value={hook} onChange={(e) => setHook(e.target.value)} />
+                  <button className="approve" disabled={!hook.trim() || hookBusy} onClick={async () => {
+                    setHookBusy(true); setHookMsg(null);
+                    const r = await connect('webhook', { url: hook.trim() });
+                    setHookBusy(false); setHookMsg(r.message); if (r.connected) setHook('');
+                  }}>{hookBusy ? <span className="spin">⟳</span> : 'Connect & test'}</button>
+                </div>
+                {hookMsg && <div className="note" style={{ fontSize: 12, marginTop: 6 }}>{hookMsg}</div>}
+              </>
             )}
           </div>
 
@@ -681,14 +693,21 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
             {smtpOn ? (
               <button className="reject" onClick={() => disconnect('smtp')}>Disconnect</button>
             ) : (
-              <div className="smtp-grid">
-                <input className="field" placeholder="SMTP host" value={smtp.host} onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} />
-                <input className="field" placeholder="Port" value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: e.target.value })} />
-                <input className="field" placeholder="Username" value={smtp.user} onChange={(e) => setSmtp({ ...smtp, user: e.target.value })} />
-                <input className="field" type="password" placeholder="Password" value={smtp.pass} onChange={(e) => setSmtp({ ...smtp, pass: e.target.value })} />
-                <input className="field" placeholder="From address" value={smtp.from} onChange={(e) => setSmtp({ ...smtp, from: e.target.value })} />
-                <button className="approve" disabled={!smtp.host.trim()} onClick={() => connect('smtp', smtp)}>Connect</button>
-              </div>
+              <>
+                <div className="smtp-grid">
+                  <input className="field" placeholder="SMTP host" value={smtp.host} onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} />
+                  <input className="field" placeholder="Port" value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: e.target.value })} />
+                  <input className="field" placeholder="Username" value={smtp.user} onChange={(e) => setSmtp({ ...smtp, user: e.target.value })} />
+                  <input className="field" type="password" placeholder="Password" value={smtp.pass} onChange={(e) => setSmtp({ ...smtp, pass: e.target.value })} />
+                  <input className="field" placeholder="From address" value={smtp.from} onChange={(e) => setSmtp({ ...smtp, from: e.target.value })} />
+                  <button className="approve" disabled={!smtp.host.trim() || smtpBusy} onClick={async () => {
+                    setSmtpBusy(true); setSmtpMsg(null);
+                    const r = await connect('smtp', smtp);
+                    setSmtpBusy(false); setSmtpMsg(r.message);
+                  }}>{smtpBusy ? <span className="spin">⟳</span> : 'Connect & test'}</button>
+                </div>
+                {smtpMsg && <div className="note" style={{ fontSize: 12, marginTop: 6 }}>{smtpMsg}</div>}
+              </>
             )}
           </div>
 
@@ -717,29 +736,33 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
 
 function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, onDisconnect, onCreate }: {
   c: Channel; webhookOn: boolean; smtpOn: boolean; hasCampaign: boolean; hasProject: boolean;
-  onConnect: (key: string, secrets: any) => void; onDisconnect: (key: string) => void;
-  onCreate: (channel: string) => Promise<string | null>;
+  onConnect: (key: string, secrets: any) => Promise<{ connected: boolean; message: string }>;
+  onDisconnect: (key: string) => void; onCreate: (channel: string) => Promise<string | null>;
 }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ handle: '', token: '', url: '' });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState<string | null>(null);
 
   const auto = c.connected || (c.executor === 'webhook' && webhookOn) || (c.executor === 'smtp' && smtpOn);
-  const statusText = c.connected ? 'connected' : (c.executor === 'webhook' && webhookOn) ? 'via webhook'
-    : (c.executor === 'smtp' && smtpOn) ? 'via SMTP' : c.executor === 'manual' ? 'publish-ready' : 'not connected';
+  const statusText = c.connected ? 'connected' : (c.executor === 'webhook' && webhookOn) ? 'auto via global webhook'
+    : (c.executor === 'smtp' && smtpOn) ? 'auto via SMTP' : c.executor === 'manual' ? 'publish-ready' : 'publish-ready';
 
-  const save = () => {
-    if (!f.handle && !f.token && !f.url) return;
-    onConnect(c.key, { handle: f.handle || undefined, token: f.token || undefined, url: f.url || undefined });
-    setOpen(false); setF({ handle: '', token: '', url: '' });
+  const save = async () => {
+    if (!f.url && !f.handle && !f.token) return;
+    setBusy(true); setMsg(null);
+    const r = await onConnect(c.key, { url: f.url || undefined, handle: f.handle || undefined, token: f.token || undefined });
+    setBusy(false); setMsg(r.message);
+    if (r.connected) { setOpen(false); setF({ handle: '', token: '', url: '' }); }
   };
   const create = async () => {
     setCreating(true); setCreateMsg(null);
     const err = await onCreate(c.key);
     setCreating(false);
     setCreateMsg(err ? `⚠ ${err}` : '✓ Agent is preparing it — check your action queue.');
-    setTimeout(() => setCreateMsg(null), 6000);
+    setTimeout(() => setCreateMsg(null), 7000);
   };
 
   return (
@@ -754,19 +777,23 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
           </button>
           {c.connected
             ? <button className="mini danger" onClick={() => onDisconnect(c.key)}>Disconnect</button>
-            : <button className="mini" onClick={() => setOpen(!open)}>{open ? 'Cancel' : 'Connect'}</button>}
+            : <button className="mini" onClick={() => { setOpen(!open); setMsg(null); }}>{open ? 'Cancel' : 'Connect'}</button>}
         </div>
       </div>
       {createMsg && <div className="chan-msg">{createMsg}</div>}
       {open && !c.connected && (
         <div className="chan-form">
-          <input className="field" placeholder="@handle / username (optional)" value={f.handle} onChange={(e) => setF({ ...f, handle: e.target.value })} />
-          <input className="field" placeholder="API key / access token (optional)" value={f.token} onChange={(e) => setF({ ...f, token: e.target.value })} />
-          <input className="field" placeholder="Posting webhook URL for this channel (optional)" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} />
-          <button className="approve" onClick={save} disabled={!f.handle && !f.token && !f.url}>Save & connect</button>
-          <div className="note" style={{ fontSize: 11 }}>Tip: a per-channel webhook URL routes this channel's approved actions straight to your automation.</div>
+          <div className="note" style={{ fontSize: 11.5 }}>To auto-post here, paste a <b>posting webhook URL</b> from Zapier / Make / Buffer / n8n (pointed at your real account). We send a test ping and only mark it connected if it works.</div>
+          <input className="field" placeholder="Posting webhook URL  (required to auto-post)" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} />
+          <input className="field" placeholder="@handle / username  (optional, reference)" value={f.handle} onChange={(e) => setF({ ...f, handle: e.target.value })} />
+          <input className="field" placeholder="API key / access token  (optional, reference)" value={f.token} onChange={(e) => setF({ ...f, token: e.target.value })} />
+          <button className="approve" onClick={save} disabled={busy || (!f.url && !f.handle && !f.token)}>
+            {busy ? <span className="spin">⟳</span> : f.url.trim() ? 'Connect & test' : 'Save'}
+          </button>
+          {msg && <div className="note" style={{ fontSize: 11.5 }}>{msg}</div>}
         </div>
       )}
+      {msg && !open && <div className="chan-msg">{msg}</div>}
     </div>
   );
 }

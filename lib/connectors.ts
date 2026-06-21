@@ -103,6 +103,37 @@ async function postWebhook(url: string, action: ActionRow): Promise<{ status: st
 
 const safeJSON = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
+// Verify a posting webhook by sending a clearly-marked test ping. We only mark a
+// connector "connected" if it actually works — no fake "connected" states.
+export async function pingWebhook(url: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const res = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'connection_test', source: 'agentic-marketer', ts: Date.now() }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) return { ok: true, message: `Webhook verified (HTTP ${res.status}). A test ping was sent — your automation should ignore type:"connection_test".` };
+    return { ok: false, message: `That URL returned HTTP ${res.status}. Double-check the webhook URL.` };
+  } catch (e: any) {
+    return { ok: false, message: `Could not reach that URL: ${e?.message || e}` };
+  }
+}
+
+// Verify SMTP credentials by actually authenticating with the server.
+export async function verifySmtp(secrets: any): Promise<{ ok: boolean; message: string }> {
+  try {
+    const t = nodemailer.createTransport({
+      host: secrets.host, port: Number(secrets.port) || 587,
+      secure: secrets.secure ?? Number(secrets.port) === 465,
+      auth: secrets.user ? { user: secrets.user, pass: secrets.pass } : undefined,
+    });
+    await t.verify();
+    return { ok: true, message: 'SMTP verified — credentials authenticate.' };
+  } catch (e: any) {
+    return { ok: false, message: `SMTP check failed: ${e?.message || e}` };
+  }
+}
+
 // Execute an approved action via the best available connected executor.
 export async function runAction(action: ActionRow): Promise<{ status: 'done' | 'ready' | 'failed'; detail: string }> {
   // Account-setup tasks are always a human step — never auto-executed.
