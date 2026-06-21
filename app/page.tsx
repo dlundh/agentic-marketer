@@ -39,6 +39,15 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [showChannels, setShowChannels] = useState(false);
   const [showLaunch, setShowLaunch] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Handle the Mastodon OAuth round-trip return.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get('mastodon');
+    if (p === 'connected') { setNotice('✅ Mastodon connected — approved Mastodon posts will now publish to your account automatically.'); setShowChannels(true); }
+    else if (p === 'error') setError('Mastodon connection failed or was cancelled. Please try again.');
+    if (p) window.history.replaceState({}, '', window.location.pathname);
+  }, []);
 
   // ---- data loaders ----
   const loadAuth = useCallback(async () => {
@@ -165,6 +174,7 @@ export default function Page() {
 
       <div className="wrap">
         <Hero onSubmit={onSubmit} />
+        {notice && <div className="banner ok" style={{ marginTop: 20 }}>{notice}</div>}
         {error && <div className="banner" style={{ marginTop: 20 }}>{error}</div>}
 
         {/* ACTIVE PROJECT */}
@@ -745,6 +755,15 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
   const [msg, setMsg] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState<string | null>(null);
+  const [instance, setInstance] = useState('mastodon.social');
+
+  const startMastodon = async () => {
+    setBusy(true); setMsg(null);
+    const r = await fetch('/api/oauth/mastodon/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance }) })
+      .then((x) => x.json()).catch(() => ({ error: 'Could not start.' }));
+    if (r.url) { window.location.href = r.url; } // redirect to instance OAuth consent
+    else { setBusy(false); setMsg(r.error || 'Could not start.'); }
+  };
 
   const auto = c.connected || (c.executor === 'webhook' && webhookOn) || (c.executor === 'smtp' && smtpOn);
   const statusText = c.connected ? 'connected' : (c.executor === 'webhook' && webhookOn) ? 'auto via global webhook'
@@ -781,7 +800,16 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
         </div>
       </div>
       {createMsg && <div className="chan-msg">{createMsg}</div>}
-      {open && !c.connected && (
+      {open && !c.connected && (c.key === 'mastodon' ? (
+        <div className="chan-form">
+          <div className="note" style={{ fontSize: 11.5 }}>Connect your <b>existing</b> Mastodon account — no new signup, no phone. We register the app on your instance and post directly via the official API.</div>
+          <input className="field" placeholder="your instance, e.g. mastodon.social" value={instance} onChange={(e) => setInstance(e.target.value)} />
+          <button className="approve" onClick={startMastodon} disabled={busy || !instance.trim()}>
+            {busy ? <span className="spin">⟳</span> : 'Connect with Mastodon ↗'}
+          </button>
+          {msg && <div className="note" style={{ fontSize: 11.5 }}>{msg}</div>}
+        </div>
+      ) : (
         <div className="chan-form">
           <div className="note" style={{ fontSize: 11.5 }}>To auto-post here, paste a <b>posting webhook URL</b> from Zapier / Make / Buffer / n8n (pointed at your real account). We send a test ping and only mark it connected if it works.</div>
           <input className="field" placeholder="Posting webhook URL  (required to auto-post)" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} />
@@ -792,7 +820,7 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
           </button>
           {msg && <div className="note" style={{ fontSize: 11.5 }}>{msg}</div>}
         </div>
-      )}
+      ))}
       {msg && !open && <div className="chan-msg">{msg}</div>}
     </div>
   );

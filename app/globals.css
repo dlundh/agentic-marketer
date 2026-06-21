@@ -191,6 +191,7 @@ a { color: var(--accent); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .banner { background: rgba(240,107,107,.12); border: 1px solid rgba(240,107,107,.4); color: var(--red); padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-bottom: 14px; }
+.banner.ok { background: rgba(61,220,151,.12); border-color: rgba(61,220,151,.4); color: var(--green); }
 .note { color: var(--muted); font-size: 13px; line-height: 1.6; }
 .field { width: 100%; background: var(--bg-soft); border: 1px solid var(--border); color: var(--text); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; font-family: inherit; margin-top: 8px; }
 .codeline { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-soft); border: 1px solid var(--border); padding: 8px 12px; border-radius: 8px; font-size: 12.5px; color: var(--green); }

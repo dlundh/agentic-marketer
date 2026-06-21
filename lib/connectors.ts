@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { getConnector, upsertConnector, type ActionRow, type Connector } from './db';
+import { postMastodon } from './oauth';
 
 // ---------------------------------------------------------------------------
 // Channel catalog + execution adapters.
@@ -149,6 +150,12 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
   const hook = getConnector('webhook');
 
   try {
+    // Native API adapter: post directly via the platform (no webhook needed).
+    if (action.channel === 'mastodon' && ownSecrets?.access_token && ownSecrets?.instance) {
+      const text = (action.content || action.summary || action.title || '').trim();
+      const r = await postMastodon(ownSecrets.instance, ownSecrets.access_token, text);
+      return { status: 'done', detail: `Posted to Mastodon${ownSecrets.handle ? ` as @${ownSecrets.handle}` : ''}${r.count > 1 ? ` (${r.count}-post thread)` : ''}: ${r.url}` };
+    }
     if (emailish && smtp?.connected) return await sendEmail(smtp, action) as any;
     // A channel connected with its own posting webhook takes precedence.
     if (ownSecrets?.url) return await postWebhook(ownSecrets.url, action) as any;
