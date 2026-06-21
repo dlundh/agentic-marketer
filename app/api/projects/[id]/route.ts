@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getProject, listJobs, listFindings, listFiles, listActivity } from '@/lib/db';
+import {
+  getProject, listJobs, listFindings, listFiles, listActivity,
+  getCampaignByProject, listActions,
+} from '@/lib/db';
 import { isRunning } from '@/lib/orchestrator';
 
 export const runtime = 'nodejs';
@@ -14,10 +17,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     live: isRunning(j.id),
     activity: listActivity(j.id),
   }));
+
+  const campaign = getCampaignByProject(id);
+  const actions = campaign ? listActions(campaign.id) : [];
+
   return NextResponse.json({
     project,
     jobs,
     findings: listFindings(id),
     files: listFiles(id),
+    campaign: campaign ?? null,
+    actions,
   });
 }

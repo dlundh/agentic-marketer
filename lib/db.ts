@@ -84,11 +84,59 @@ function init(): DatabaseSync {
       created_at   INTEGER NOT NULL
     );
 
+    -- Execution phase: a budgeted campaign, the channel connectors it can use,
+    -- and the queue of concrete marketing actions the swarm proposes.
+    CREATE TABLE IF NOT EXISTS campaigns (
+      id            TEXT PRIMARY KEY,
+      project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      status        TEXT NOT NULL DEFAULT 'active',       -- active | paused | done
+      currency      TEXT NOT NULL DEFAULT 'USD',
+      budget_cents  INTEGER NOT NULL DEFAULT 0,           -- hard ceiling (0 = pure organic)
+      spent_cents   INTEGER NOT NULL DEFAULT 0,           -- committed + executed spend
+      channels      TEXT,                                 -- JSON array of selected channel keys
+      autonomy      TEXT NOT NULL DEFAULT 'approval',     -- approval | autonomous
+      strategy      TEXT,
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
+    );
+
+    -- Connectors are GLOBAL (an account is connected once, reused by any campaign).
+    CREATE TABLE IF NOT EXISTS connectors (
+      key           TEXT PRIMARY KEY,                     -- channel key, e.g. 'webhook','smtp','x','meta_ads'
+      label         TEXT NOT NULL,
+      executor      TEXT NOT NULL,                        -- webhook | smtp | manual
+      secrets       TEXT,                                 -- JSON credentials/config
+      connected     INTEGER NOT NULL DEFAULT 0,
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS actions (
+      id            TEXT PRIMARY KEY,
+      project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      campaign_id   TEXT NOT NULL,
+      job_id        TEXT,                                 -- swarm agent that proposed it
+      channel       TEXT NOT NULL,                        -- channel key
+      kind          TEXT NOT NULL,                        -- post | thread | ad | email | outreach | experiment | asset | seo
+      title         TEXT NOT NULL,
+      summary       TEXT,
+      content       TEXT,                                 -- the actual copy / payload (markdown)
+      meta          TEXT,                                 -- JSON: targeting, schedule hints, links, rationale
+      cost_cents    INTEGER NOT NULL DEFAULT 0,           -- estimated spend if executed
+      status        TEXT NOT NULL DEFAULT 'proposed',     -- proposed | approved | rejected | ready | done | failed
+      result        TEXT,
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_jobs_project   ON jobs(project_id);
     CREATE INDEX IF NOT EXISTS idx_activity_job   ON activity(job_id);
     CREATE INDEX IF NOT EXISTS idx_activity_proj  ON activity(project_id);
     CREATE INDEX IF NOT EXISTS idx_findings_proj  ON findings(project_id);
     CREATE INDEX IF NOT EXISTS idx_files_proj     ON files(project_id);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_proj ON campaigns(project_id);
+    CREATE INDEX IF NOT EXISTS idx_actions_proj   ON actions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_actions_camp   ON actions(campaign_id);
   `);
 
   // NB: recovery of interrupted jobs is handled by orchestrator.reconcile(),
@@ -241,5 +289,103 @@ export function changeSignature(): string {
   const j = db.prepare(`SELECT COALESCE(MAX(updated_at),0) m, COUNT(*) c FROM jobs`).get() as any;
   const p = db.prepare(`SELECT COALESCE(MAX(updated_at),0) m, COUNT(*) c FROM projects`).get() as any;
   const f = db.prepare(`SELECT COALESCE(MAX(created_at),0) m, COUNT(*) c FROM files`).get() as any;
-  return `${a.m}.${a.c}_${j.m}.${j.c}_${p.m}.${p.c}_${f.m}.${f.c}`;
+  const c = db.prepare(`SELECT COALESCE(MAX(updated_at),0) m, COUNT(*) c FROM campaigns`).get() as any;
+  const ac = db.prepare(`SELECT COALESCE(MAX(updated_at),0) m, COUNT(*) c FROM actions`).get() as any;
+  return `${a.m}.${a.c}_${j.m}.${j.c}_${p.m}.${p.c}_${f.m}.${f.c}_${c.m}.${c.c}_${ac.m}.${ac.c}`;
+}
+
+// ---------------------------------------------------------------------------
+// Execution phase: campaigns, connectors, actions.
+// ---------------------------------------------------------------------------
+
+export type Campaign = {
+  id: string; project_id: string; status: string; currency: string;
+  budget_cents: number; spent_cents: number; channels: string | null;
+  autonomy: string; strategy: string | null; created_at: number; updated_at: number;
+};
+export type Connector = {
+  key: string; label: string; executor: string; secrets: string | null;
+  connected: number; created_at: number; updated_at: number;
+};
+export type ActionRow = {
+  id: string; project_id: string; campaign_id: string; job_id: string | null;
+  channel: string; kind: string; title: string; summary: string | null;
+  content: string | null; meta: string | null; cost_cents: number;
+  status: string; result: string | null; created_at: number; updated_at: number;
+};
+
+export function createCampaign(c: {
+  project_id: string; budget_cents: number; currency?: string; channels: string[]; autonomy?: string;
+}): Campaign {
+  const id = uid('c_'); const t = now();
+  db.prepare(
+    `INSERT INTO campaigns (id,project_id,status,currency,budget_cents,spent_cents,channels,autonomy,created_at,updated_at)
+     VALUES (?,?, 'active', ?, ?, 0, ?, ?, ?,?)`
+  ).run(id, c.project_id, c.currency ?? 'USD', c.budget_cents, JSON.stringify(c.channels),
+        c.autonomy ?? 'approval', t, t);
+  return getCampaign(id)!;
+}
+export const getCampaign = (id: string) =>
+  db.prepare(`SELECT * FROM campaigns WHERE id=?`).get(id) as Campaign | undefined;
+export const getCampaignByProject = (projectId: string) =>
+  db.prepare(`SELECT * FROM campaigns WHERE project_id=? ORDER BY created_at DESC LIMIT 1`).get(projectId) as Campaign | undefined;
+export function updateCampaign(id: string, patch: Partial<Campaign>) {
+  const cur = getCampaign(id); if (!cur) return;
+  const n = { ...cur, ...patch, updated_at: now() };
+  db.prepare(`UPDATE campaigns SET status=?,budget_cents=?,spent_cents=?,channels=?,autonomy=?,strategy=?,updated_at=? WHERE id=?`)
+    .run(n.status, n.budget_cents, n.spent_cents, n.channels ?? null, n.autonomy, n.strategy ?? null, n.updated_at, id);
+}
+// Atomically reserve spend against the hard cap. Returns false if it would bust budget.
+export function reserveSpend(campaignId: string, cents: number): boolean {
+  const c = getCampaign(campaignId); if (!c) return false;
+  if (cents <= 0) return true;
+  if (c.spent_cents + cents > c.budget_cents) return false;
+  db.prepare(`UPDATE campaigns SET spent_cents=spent_cents+?, updated_at=? WHERE id=?`).run(cents, now(), campaignId);
+  return true;
+}
+export function refundSpend(campaignId: string, cents: number) {
+  if (cents <= 0) return;
+  db.prepare(`UPDATE campaigns SET spent_cents=MAX(0,spent_cents-?), updated_at=? WHERE id=?`).run(cents, now(), campaignId);
+}
+
+export function upsertConnector(c: { key: string; label: string; executor: string; secrets?: any; connected: boolean }) {
+  const t = now();
+  const secrets = c.secrets ? JSON.stringify(c.secrets) : null;
+  db.prepare(
+    `INSERT INTO connectors (key,label,executor,secrets,connected,created_at,updated_at)
+     VALUES (?,?,?,?,?,?,?)
+     ON CONFLICT(key) DO UPDATE SET label=excluded.label, executor=excluded.executor,
+       secrets=COALESCE(excluded.secrets, connectors.secrets), connected=excluded.connected, updated_at=excluded.updated_at`
+  ).run(c.key, c.label, c.executor, secrets, c.connected ? 1 : 0, t, t);
+}
+export const getConnector = (key: string) =>
+  db.prepare(`SELECT * FROM connectors WHERE key=?`).get(key) as Connector | undefined;
+export const listConnectors = () =>
+  db.prepare(`SELECT * FROM connectors ORDER BY key ASC`).all() as Connector[];
+export function disconnectConnector(key: string) {
+  db.prepare(`UPDATE connectors SET connected=0, secrets=NULL, updated_at=? WHERE key=?`).run(now(), key);
+}
+
+export function createAction(a: {
+  project_id: string; campaign_id: string; job_id?: string; channel: string; kind: string;
+  title: string; summary?: string; content?: string; meta?: any; cost_cents?: number; status?: string;
+}): ActionRow {
+  const id = uid('act_'); const t = now();
+  db.prepare(
+    `INSERT INTO actions (id,project_id,campaign_id,job_id,channel,kind,title,summary,content,meta,cost_cents,status,created_at,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).run(id, a.project_id, a.campaign_id, a.job_id ?? null, a.channel, a.kind, a.title,
+        a.summary ?? null, a.content ?? null, a.meta ? JSON.stringify(a.meta) : null,
+        a.cost_cents ?? 0, a.status ?? 'proposed', t, t);
+  return getAction(id)!;
+}
+export const getAction = (id: string) =>
+  db.prepare(`SELECT * FROM actions WHERE id=?`).get(id) as ActionRow | undefined;
+export const listActions = (campaignId: string) =>
+  db.prepare(`SELECT * FROM actions WHERE campaign_id=? ORDER BY created_at ASC`).all(campaignId) as ActionRow[];
+export function updateAction(id: string, patch: Partial<ActionRow>) {
+  const cur = getAction(id); if (!cur) return;
+  const n = { ...cur, ...patch, updated_at: now() };
+  db.prepare(`UPDATE actions SET status=?,result=?,title=?,summary=?,content=?,meta=?,cost_cents=?,updated_at=? WHERE id=?`)
+    .run(n.status, n.result ?? null, n.title, n.summary ?? null, n.content ?? null, n.meta ?? null, n.cost_cents, n.updated_at, id);
 }

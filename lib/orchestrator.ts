@@ -1,9 +1,12 @@
 import {
-  createProject, createJob, updateJob, getJob, getProject, listJobs,
-  listFindings, listAllActiveJobs, type Job,
+  createProject, createJob, updateJob, getJob, getProject, updateProject, listJobs,
+  listFindings, listAllActiveJobs, createCampaign, getCampaign, getCampaignByProject,
+  updateCampaign, getAction, updateAction, reserveSpend, refundSpend,
+  type Job, type ActionRow,
 } from './db';
 import { emitEvent } from './events';
-import { runAgent } from './agent';
+import { runAgent, ROLE_LABELS } from './agent';
+import { runAction, channelDef, CHANNELS } from './connectors';
 
 // ---------------------------------------------------------------------------
 // Owns the lifecycle of every job. Holds an AbortController per running job so
@@ -83,6 +86,11 @@ async function drive(job: Job, opts: { resume?: boolean; attachments?: string[] 
         drive(mkt); // fire and forget
       }
     }
+
+    // Strategist -> channel specialists transition (execution swarm fan-out).
+    if (job.phase === 'execution' && job.kind === 'strategist') {
+      spawnSpecialists(job.project_id);
+    }
   } catch (err: any) {
     running.delete(job.id);
     if (abort.signal.aborted) {
@@ -136,6 +144,94 @@ export function resumeJob(jobId: string) {
   if (!job || running.has(jobId)) return false;
   if (!['paused', 'error', 'queued'].includes(job.status)) return false;
   drive(job, { resume: Boolean(job.session_id) });
+  return true;
+}
+
+// --- execution swarm --------------------------------------------------------
+
+const CATEGORY_ROLE: Record<string, string> = {
+  organic: 'organic', community: 'organic', content: 'organic',
+  email: 'email', paid: 'ads', influencer: 'influencer',
+};
+
+// Which specialist roles are implied by the campaign's selected channels.
+function rolesForChannels(channelKeys: string[]): string[] {
+  const roles = new Set<string>();
+  for (const key of channelKeys) {
+    const cat = channelDef(key).category;
+    const role = CATEGORY_ROLE[cat];
+    if (role) roles.add(role);
+  }
+  return [...roles];
+}
+
+export function launchCampaign(projectId: string, opts: { budget_cents: number; channels: string[]; autonomy?: string }) {
+  const project = getProject(projectId);
+  if (!project) return null;
+  const campaign = createCampaign({
+    project_id: projectId, budget_cents: Math.max(0, opts.budget_cents),
+    channels: opts.channels, autonomy: opts.autonomy ?? 'approval',
+  });
+  updateProject(projectId, { phase: 'execution', status: 'active' });
+  emitEvent({ type: 'project', projectId });
+  const strat = createJob({ project_id: projectId, kind: 'strategist', title: ROLE_LABELS.strategist, phase: 'execution' });
+  emitEvent({ type: 'job', projectId, jobId: strat.id });
+  drive(strat);
+  return campaign;
+}
+
+function spawnSpecialists(projectId: string) {
+  const campaign = getCampaignByProject(projectId);
+  if (!campaign) return;
+  const channels: string[] = campaign.channels ? JSON.parse(campaign.channels) : [];
+  const roles = rolesForChannels(channels);
+  const existing = listJobs(projectId);
+  for (const role of roles) {
+    if (existing.some((j) => j.phase === 'execution' && j.kind === role)) continue;
+    const job = createJob({ project_id: projectId, kind: role, title: ROLE_LABELS[role] || role, phase: 'execution' });
+    emitEvent({ type: 'job', projectId, jobId: job.id });
+    drive(job); // specialists run concurrently
+  }
+}
+
+// Spin up the optimizer on demand (after some actions exist / have run).
+export function launchOptimizer(projectId: string) {
+  const campaign = getCampaignByProject(projectId);
+  if (!campaign) return false;
+  const job = createJob({ project_id: projectId, kind: 'optimizer', title: ROLE_LABELS.optimizer, phase: 'execution' });
+  emitEvent({ type: 'job', projectId, jobId: job.id });
+  drive(job);
+  return true;
+}
+
+// Approve a proposed action: reserve budget (hard cap), then execute it via the
+// best connected channel. Returns an error string if it would bust the budget.
+export async function approveAction(actionId: string): Promise<{ ok: boolean; error?: string }> {
+  const a = getAction(actionId);
+  if (!a || a.status !== 'proposed') return { ok: false, error: 'Action is not awaiting approval.' };
+  if (a.cost_cents > 0 && !reserveSpend(a.campaign_id, a.cost_cents)) {
+    const c = getCampaign(a.campaign_id);
+    const remaining = c ? (c.budget_cents - c.spent_cents) / 100 : 0;
+    return { ok: false, error: `Blocked: $${(a.cost_cents / 100).toFixed(2)} exceeds the remaining budget of $${remaining.toFixed(2)}.` };
+  }
+  updateAction(actionId, { status: 'approved' });
+  emitEvent({ type: 'finding', projectId: a.project_id });
+  // Execute asynchronously so the API call returns immediately.
+  (async () => {
+    const res = await runAction(getAction(actionId)!);
+    if (res.status === 'failed' && a.cost_cents > 0) refundSpend(a.campaign_id, a.cost_cents);
+    updateAction(actionId, { status: res.status, result: res.detail });
+    emitEvent({ type: 'finding', projectId: a.project_id });
+  })();
+  return { ok: true };
+}
+
+export function rejectAction(actionId: string): boolean {
+  const a = getAction(actionId);
+  if (!a || !['proposed', 'approved', 'ready', 'failed'].includes(a.status)) return false;
+  if (a.status === 'approved' && a.cost_cents > 0) refundSpend(a.campaign_id, a.cost_cents);
+  updateAction(actionId, { status: 'rejected' });
+  emitEvent({ type: 'finding', projectId: a.project_id });
   return true;
 }
 

@@ -12,8 +12,11 @@ type Activity = { id: string; kind: string; label: string | null; content: strin
 type Finding = { id: string; category: string | null; title: string; summary: string | null; details: string | null; job_id: string | null };
 type FileRow = { id: string; name: string; mime: string; size: number; kind: string | null; job_id: string | null };
 type Project = { id: string; title: string; prompt: string; url: string | null; phase: string; status: string; summary: string | null; updated_at: number; jobs?: Job[] };
-type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[] };
+type Campaign = { id: string; status: string; currency: string; budget_cents: number; spent_cents: number; channels: string | null; autonomy: string; strategy: string | null };
+type ActionItem = { id: string; channel: string; kind: string; title: string; summary: string | null; content: string | null; meta: string | null; cost_cents: number; status: string; result: string | null; job_id: string | null };
+type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[] };
 type Auth = { connected: boolean; method: string; detail: string };
+type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean };
 
 // ----------------------------- helpers --------------------------------------
 const fmtBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -34,6 +37,8 @@ export default function Page() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [modalJobId, setModalJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showChannels, setShowChannels] = useState(false);
+  const [showLaunch, setShowLaunch] = useState(false);
 
   // ---- data loaders ----
   const loadAuth = useCallback(async () => {
@@ -95,16 +100,48 @@ export default function Page() {
     loadProjects();
   };
 
+  const launchCampaign = async (budgetUsd: number, channels: string[]) => {
+    if (!currentId) return;
+    const res = await fetch(`/api/projects/${currentId}/campaign`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ budget_usd: budgetUsd, channels, autonomy: 'approval' }),
+    });
+    const d = await res.json();
+    if (!res.ok) { setError(d.error || 'Failed to launch.'); return; }
+    setShowLaunch(false);
+    loadDetail(currentId);
+  };
+
+  const decide = async (actionId: string, action: 'approve' | 'reject') => {
+    const res = await fetch(`/api/actions/${actionId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok && d.error) setError(d.error);
+    if (currentId) loadDetail(currentId);
+  };
+
+  const optimize = async () => {
+    if (!currentId) return;
+    await fetch(`/api/projects/${currentId}/campaign`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'optimize' }),
+    });
+    loadDetail(currentId);
+  };
+
   const modalJob = detail?.jobs.find((j) => j.id === modalJobId) || null;
 
   return (
     <>
       <div className="topbar">
         <div className="brand"><span className="dot" /> Agentic Marketer</div>
-        <button className={`connect ${auth?.connected ? 'on' : 'off'}`} onClick={() => setShowConnect(true)}>
-          <span className="pip" />
-          {auth?.connected ? 'Claude connected' : 'Connect Claude'}
-        </button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button className="connect" onClick={() => setShowChannels(true)}>⚙ Channels</button>
+          <button className={`connect ${auth?.connected ? 'on' : 'off'}`} onClick={() => setShowConnect(true)}>
+            <span className="pip" />
+            {auth?.connected ? 'Claude connected' : 'Connect Claude'}
+          </button>
+        </div>
       </div>
 
       <div className="wrap">
@@ -129,6 +166,25 @@ export default function Page() {
               ))}
               {detail.jobs.length === 0 && <div className="empty">No jobs yet.</div>}
             </div>
+
+            {/* Execution phase: campaign + action queue, or a CTA to launch it */}
+            {detail.campaign ? (
+              <CampaignPanel
+                campaign={detail.campaign}
+                actions={detail.actions}
+                onDecide={decide}
+                onOptimize={optimize}
+                anyExecLive={detail.jobs.some((j) => j.phase === 'execution' && j.live)}
+              />
+            ) : ['marketing', 'done'].includes(detail.project.phase) && !detail.jobs.some((j) => j.live) ? (
+              <div className="launch-cta">
+                <div>
+                  <div className="lc-title">🚀 Ready to execute</div>
+                  <div className="note">Research and the marketing plan are done. Launch the growth swarm to start proposing real actions to reach customers — within a budget you set (even $0).</div>
+                </div>
+                <button className="submit" onClick={() => setShowLaunch(true)}>Launch growth campaign →</button>
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -163,6 +219,8 @@ export default function Page() {
         />
       )}
       {showConnect && <ConnectModal auth={auth} onClose={() => setShowConnect(false)} reload={loadAuth} />}
+      {showChannels && <ChannelsModal onClose={() => setShowChannels(false)} />}
+      {showLaunch && detail && <LaunchModal onClose={() => setShowLaunch(false)} onLaunch={launchCampaign} />}
     </>
   );
 }
@@ -260,7 +318,7 @@ function JobCard({ job, onOpen, onControl }: {
 }
 
 function ActivityLine({ a }: { a: Activity }) {
-  const label = ({ text: 'thinking', tool_use: 'tool', finding: 'learned', file: 'file', status: 'status', error: 'error' } as any)[a.kind] || a.kind;
+  const label = ({ text: 'thinking', tool_use: 'tool', finding: 'learned', file: 'file', status: 'status', error: 'error', action: 'proposed' } as any)[a.kind] || a.kind;
   return (
     <div className="line">
       <span className={`badge b-${a.kind}`}>{label}</span>
@@ -292,7 +350,8 @@ function StatusPill({ status }: { status: string }) {
 }
 
 function PhaseChip({ phase }: { phase: string }) {
-  const label = phase === 'research' ? 'Researching' : phase === 'marketing' ? 'Marketing' : 'Complete';
+  const label = phase === 'research' ? 'Researching' : phase === 'marketing' ? 'Marketing'
+    : phase === 'execution' ? 'Executing' : 'Complete';
   return <span className={`phase-chip ph-${phase}`}>{label}</span>;
 }
 
@@ -343,6 +402,243 @@ function JobModal({ job, findings, files, onClose }: {
             <div className="feed" style={{ maxHeight: 320, border: '1px solid var(--border)', borderRadius: 10 }}>
               {activity.length === 0 && <div className="note">No activity recorded yet.</div>}
               {activity.map((a) => <ActivityLine key={a.id} a={a} />)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------- Campaign / execution -------------------------
+const CH_LABEL: Record<string, string> = {
+  webhook: 'Automation webhook', smtp: 'Email (SMTP)', x: 'X / Twitter', linkedin: 'LinkedIn',
+  reddit: 'Reddit', instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook', youtube: 'YouTube',
+  mastodon: 'Mastodon', threads: 'Threads', discord: 'Discord', hackernews: 'Hacker News',
+  producthunt: 'Product Hunt', indiehackers: 'Indie Hackers', blog: 'Blog / SEO', email: 'Email outreach',
+  influencer: 'Influencer', meta_ads: 'Meta Ads', google_ads: 'Google Ads', reddit_ads: 'Reddit Ads',
+  tiktok_ads: 'TikTok Ads', x_ads: 'X Ads',
+};
+const chLabel = (k: string) => CH_LABEL[k] || k;
+const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
+function CampaignPanel({ campaign, actions, onDecide, onOptimize, anyExecLive }: {
+  campaign: Campaign; actions: ActionItem[]; onDecide: (id: string, a: 'approve' | 'reject') => void;
+  onOptimize: () => void; anyExecLive: boolean;
+}) {
+  const proposed = actions.filter((a) => a.status === 'proposed');
+  const live = actions.filter((a) => ['approved', 'done', 'ready'].includes(a.status));
+  const rejected = actions.filter((a) => a.status === 'rejected' || a.status === 'failed');
+  const pct = campaign.budget_cents > 0 ? Math.min(100, (campaign.spent_cents / campaign.budget_cents) * 100) : 0;
+
+  return (
+    <div className="campaign">
+      <div className="budget">
+        <div className="budget-head">
+          <div>
+            <div className="budget-label">Campaign budget {campaign.budget_cents === 0 && <span className="zero-pill">$0 — pure growth hacking</span>}</div>
+            <div className="budget-nums">
+              <b>{usd(campaign.spent_cents)}</b> committed · {usd(campaign.budget_cents - campaign.spent_cents)} remaining
+              <span className="of"> of {usd(campaign.budget_cents)}</span>
+            </div>
+          </div>
+          <button className="iconbtn" onClick={onOptimize} disabled={anyExecLive} title="Run an optimizer pass">✨ Optimize</button>
+        </div>
+        {campaign.budget_cents > 0 && <div className="meter"><div className="meter-fill" style={{ width: `${pct}%` }} /></div>}
+        <div className="note" style={{ fontSize: 12, marginTop: 8 }}>
+          Approval-gated — nothing is published or spent until you approve it. {anyExecLive && <span className="spin">⟳</span>} {anyExecLive && 'Agents are proposing actions…'}
+        </div>
+      </div>
+
+      <div className="queue">
+        <div className="queue-col-head">Needs your approval · {proposed.length}</div>
+        {proposed.length === 0 && <div className="empty" style={{ padding: 18 }}>{anyExecLive ? 'Agents are still working…' : 'No actions waiting.'}</div>}
+        {proposed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} />)}
+
+        {live.length > 0 && <div className="queue-col-head" style={{ marginTop: 18 }}>Approved & executed · {live.length}</div>}
+        {live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} />)}
+
+        {rejected.length > 0 && <div className="note" style={{ fontSize: 12, marginTop: 14 }}>{rejected.length} rejected/failed.</div>}
+      </div>
+    </div>
+  );
+}
+
+function ActionCard({ a, onDecide }: { a: ActionItem; onDecide: (id: string, x: 'approve' | 'reject') => void }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const meta = (() => { try { return a.meta ? JSON.parse(a.meta) : {}; } catch { return {}; } })();
+  const copy = () => { navigator.clipboard?.writeText(a.content || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+
+  return (
+    <div className={`action a-${a.status}`}>
+      <div className="action-head" onClick={() => setOpen(!open)}>
+        <span className={`act-status as-${a.status}`}>{a.status}</span>
+        <span className="job-kind kind-exec">{chLabel(a.channel)} · {a.kind}</span>
+        {a.cost_cents > 0 && <span className="cost">{usd(a.cost_cents)}</span>}
+        <div className="action-title">{a.title}</div>
+        <span className="caret">{open ? '▾' : '▸'}</span>
+      </div>
+      {a.summary && <div className="action-sum">{a.summary}</div>}
+      {open && (
+        <div className="action-body">
+          {meta.targeting && <div className="kv"><b>Targeting</b> {meta.targeting}</div>}
+          {meta.subject && <div className="kv"><b>Subject</b> {meta.subject}</div>}
+          {meta.schedule && <div className="kv"><b>When</b> {meta.schedule}</div>}
+          {meta.rationale && <div className="kv"><b>Why</b> {meta.rationale}</div>}
+          {a.content && (
+            <div className="action-content">
+              <button className="copy" onClick={copy}>{copied ? '✓ Copied' : '⧉ Copy'}</button>
+              <pre>{a.content}</pre>
+            </div>
+          )}
+          {a.result && <div className="kv"><b>Result</b> {a.result}</div>}
+        </div>
+      )}
+      {a.status === 'proposed' && (
+        <div className="action-actions">
+          <button className="approve" onClick={() => onDecide(a.id, 'approve')}>✓ Approve{a.cost_cents > 0 ? ` (${usd(a.cost_cents)})` : ''}</button>
+          <button className="reject" onClick={() => onDecide(a.id, 'reject')}>✕ Reject</button>
+        </div>
+      )}
+      {['ready', 'done'].includes(a.status) && a.result && <div className="action-result">{a.status === 'done' ? '✅ ' : '📋 '}{a.result}</div>}
+    </div>
+  );
+}
+
+// ----------------------------- Launch modal ---------------------------------
+function LaunchModal({ onClose, onLaunch }: { onClose: () => void; onLaunch: (budget: number, channels: string[]) => void }) {
+  const [budget, setBudget] = useState('0');
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/connectors').then((r) => r.json()).then((d: { connectors: Channel[] }) => {
+      const list = d.connectors.filter((c) => c.category !== 'automation' && c.key !== 'smtp');
+      setChannels(list);
+      setSel(new Set(list.map((c) => c.key))); // default: everything on
+    });
+  }, []);
+
+  const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const cats: Record<string, string> = { organic: 'Organic & social', community: 'Communities', content: 'Content / SEO', email: 'Email & outreach', influencer: 'Influencer', paid: 'Paid ads' };
+  const grouped = Object.keys(cats).map((c) => ({ cat: c, items: channels.filter((ch) => ch.category === c) })).filter((g) => g.items.length);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 620 }}>
+        <div className="modal-head">
+          <div><h3>Launch growth campaign</h3><div className="note">A swarm of specialist agents will propose real actions within your budget. Every action needs your approval before anything goes live.</div></div>
+          <button className="x" onClick={onClose}>×</button>
+        </div>
+        <div className="modal-body">
+          <div className="kgroup">
+            <h4>Budget ceiling (hard cap)</h4>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 20, fontWeight: 700 }}>$</span>
+              <input className="field" style={{ marginTop: 0, maxWidth: 160, fontSize: 18 }} type="number" min="0" step="1" value={budget} onChange={(e) => setBudget(e.target.value)} />
+              <span className="note">Set <b>0</b> for pure organic / growth-hacking.</span>
+            </div>
+          </div>
+          <div className="kgroup">
+            <h4>Channels in scope</h4>
+            {grouped.map((g) => (
+              <div key={g.cat} style={{ marginBottom: 10 }}>
+                <div className="note" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{cats[g.cat]}</div>
+                <div className="chips">
+                  {g.items.map((ch) => (
+                    <button key={ch.key} className={`chan-chip ${sel.has(ch.key) ? 'on' : ''}`} onClick={() => toggle(ch.key)}>
+                      {sel.has(ch.key) ? '✓ ' : ''}{ch.label}{ch.connected ? ' 🔌' : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="submit" disabled={busy || sel.size === 0} onClick={async () => { setBusy(true); await onLaunch(Number(budget) || 0, [...sel]); setBusy(false); }}>
+            {busy ? 'Launching swarm…' : `Launch swarm across ${sel.size} channel${sel.size === 1 ? '' : 's'} →`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------- Channels modal -------------------------------
+function ChannelsModal({ onClose }: { onClose: () => void }) {
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [hook, setHook] = useState('');
+  const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', from: '' });
+
+  const load = () => fetch('/api/connectors').then((r) => r.json()).then((d) => setChannels(d.connectors));
+  useEffect(() => { load(); }, []);
+
+  const connect = async (key: string, secrets: any) => {
+    await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, connect: true, secrets }) });
+    load();
+  };
+  const disconnect = async (key: string) => {
+    await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, connect: false }) });
+    load();
+  };
+
+  const webhookOn = channels.find((c) => c.key === 'webhook')?.connected;
+  const smtpOn = channels.find((c) => c.key === 'smtp')?.connected;
+  const others = channels.filter((c) => c.key !== 'webhook' && c.key !== 'smtp');
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
+        <div className="modal-head">
+          <div><h3>Channels & accounts</h3><div className="note">Connect accounts so approved actions execute automatically. Anything not connected stays publish-ready (copy-paste).</div></div>
+          <button className="x" onClick={onClose}>×</button>
+        </div>
+        <div className="modal-body">
+          <div className="kgroup">
+            <h4>Automation webhook {webhookOn && <span className="zero-pill">connected</span>}</h4>
+            <p className="note">The universal bridge: approved posts/ads are POSTed here so Zapier / Make / n8n / Buffer publish them to any platform.</p>
+            {webhookOn ? (
+              <button className="reject" onClick={() => disconnect('webhook')}>Disconnect</button>
+            ) : (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="field" style={{ marginTop: 0 }} placeholder="https://hooks.zapier.com/…" value={hook} onChange={(e) => setHook(e.target.value)} />
+                <button className="approve" disabled={!hook.trim()} onClick={() => connect('webhook', { url: hook.trim() })}>Connect</button>
+              </div>
+            )}
+          </div>
+
+          <div className="kgroup">
+            <h4>Email (SMTP) {smtpOn && <span className="zero-pill">connected</span>}</h4>
+            <p className="note">Sends approved outreach/lifecycle email. An opt-out footer is added automatically.</p>
+            {smtpOn ? (
+              <button className="reject" onClick={() => disconnect('smtp')}>Disconnect</button>
+            ) : (
+              <div className="smtp-grid">
+                <input className="field" placeholder="SMTP host" value={smtp.host} onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} />
+                <input className="field" placeholder="Port" value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: e.target.value })} />
+                <input className="field" placeholder="Username" value={smtp.user} onChange={(e) => setSmtp({ ...smtp, user: e.target.value })} />
+                <input className="field" type="password" placeholder="Password" value={smtp.pass} onChange={(e) => setSmtp({ ...smtp, pass: e.target.value })} />
+                <input className="field" placeholder="From address" value={smtp.from} onChange={(e) => setSmtp({ ...smtp, from: e.target.value })} />
+                <button className="approve" disabled={!smtp.host.trim()} onClick={() => connect('smtp', smtp)}>Connect</button>
+              </div>
+            )}
+          </div>
+
+          <div className="kgroup">
+            <h4>Channels</h4>
+            <p className="note">How each approved action will execute. Connected accounts auto-run; the rest are publish-ready.</p>
+            <div className="chan-grid">
+              {others.map((c) => {
+                const auto = c.connected || (c.executor === 'webhook' && webhookOn) || (c.executor === 'smtp' && smtpOn);
+                return (
+                  <div key={c.key} className="chan-row">
+                    <span className={`pip2 ${auto ? 'on' : ''}`} />
+                    <span className="cn">{c.label}{c.paid ? ' 💲' : ''}</span>
+                    <span className="cx">{auto ? (c.connected ? 'connected' : c.executor === 'smtp' ? 'via SMTP' : 'via webhook') : c.executor === 'manual' ? 'publish-ready' : 'not connected'}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

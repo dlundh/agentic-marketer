@@ -29,6 +29,33 @@ Next.js API routes ──► orchestrator ──► Claude Agent SDK (query loop
 2. **Marketing phase** — a second agent automatically starts, designing the best
    approach for that customer and producing a *Go-To-Market & Marketing Plan*
    (and a content pack) as PDFs.
+3. **Execution phase (the swarm)** — you launch a budgeted campaign and a swarm
+   of specialist agents proposes real actions to win customers:
+   - **Growth strategist** sets the thesis and allocates the budget, then the
+     **organic/community**, **email/outreach**, **paid ads**, and
+     **influencer/creator** agents fan out concurrently.
+   - Every action is **approval-gated**: agents `propose_action`; nothing is
+     published or charged until you approve it in the queue.
+   - **Budget is a hard ceiling.** Agents call `check_budget`; approving an action
+     reserves its cost and any approval that would exceed the cap is blocked. At
+     **$0** the swarm goes pure-organic and hunts for free ad credits.
+   - **Ethical guardrails** (enforced in every agent prompt): no spam, fake
+     accounts/engagement/reviews, astroturfing, ToS-violating bots, deceptive
+     claims, or purchased lists. Email carries an opt-out (CAN-SPAM/GDPR).
+
+### Channels & execution
+
+Approved actions execute via the best connected **connector**:
+
+| Executor | What it does |
+|----------|--------------|
+| **Automation webhook** | POSTs the action to your Zapier / Make / n8n / Buffer hook — the universal bridge to publish anywhere. |
+| **Email (SMTP)** | Really sends approved outreach/lifecycle email (opt-out footer added). |
+| **Manual / publish-ready** | No connector for that channel yet → the action is marked ready with copy-paste content. Nothing is faked as "posted". |
+
+Manage connections from the **⚙ Channels** button (top bar). The app never
+fabricates platform access — connect accounts and the same approved action that
+was "publish-ready" starts auto-executing.
 
 ## Authentication (your Claude subscription)
 
@@ -71,9 +98,10 @@ npm run dev      # http://localhost:4400
 
 | Path | Purpose |
 |------|---------|
-| `app/page.tsx` | The single-page UI: search box, live job feed, history, modals |
-| `app/api/*` | REST + SSE endpoints |
-| `lib/db.ts` | SQLite schema + queries + change-signature |
-| `lib/orchestrator.ts` | Job lifecycle, pause/resume, research→marketing transition |
-| `lib/agent.ts` | Agent SDK runner + custom tools + prompts |
+| `app/page.tsx` | The single-page UI: search box, live job feed, history, campaign panel, modals |
+| `app/api/*` | REST + SSE endpoints (projects, jobs, actions, connectors, campaign) |
+| `lib/db.ts` | SQLite schema + queries + budget ledger + change-signature |
+| `lib/orchestrator.ts` | Job lifecycle, pause/resume, phase transitions, campaign launch, approve/execute |
+| `lib/agent.ts` | Agent SDK runner + custom tools + research/marketing/execution prompts |
+| `lib/connectors.ts` | Channel catalog + execution adapters (webhook / SMTP / manual) |
 | `lib/pdf.ts` | PDF report rendering (pdfkit) |

@@ -4,10 +4,12 @@ import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 import {
   DATA_DIR, uid, addActivity, addFinding, addFile, updateJob, updateProject,
-  getProject, getJob, touchJob, type Job, type Project,
+  getProject, getJob, touchJob, getCampaignByProject, updateCampaign, createAction,
+  listFindings, type Job, type Project,
 } from './db';
 import { emitEvent } from './events';
 import { renderPdf, type PdfSection } from './pdf';
+import { channelDef, CHANNELS } from './connectors';
 
 export function projectDir(projectId: string) {
   const dir = path.join(DATA_DIR, 'projects', projectId);
@@ -112,20 +114,92 @@ function buildTools(job: Job, outcome: RunOutcome) {
     },
   );
 
+  // --- execution-phase tools ---
+
+  const checkBudget = tool(
+    'check_budget',
+    'Check the campaign budget before proposing anything that costs money. Returns the hard cap, what is already committed, and what remains.',
+    {},
+    async () => {
+      const c = getCampaignByProject(projectId);
+      if (!c) return { content: [{ type: 'text', text: 'No active campaign.' }] };
+      const d = (n: number) => (n / 100).toFixed(2);
+      return { content: [{ type: 'text', text: JSON.stringify({
+        currency: c.currency, budget: `$${d(c.budget_cents)}`, spent_committed: `$${d(c.spent_cents)}`,
+        remaining: `$${d(c.budget_cents - c.spent_cents)}`, autonomy: c.autonomy,
+      }) }] };
+    },
+  );
+
+  const proposeAction = tool(
+    'propose_action',
+    'Propose ONE concrete marketing action for human approval (nothing is published or spent until the user approves). Write real, ready-to-publish copy in `content`.',
+    {
+      channel: z.string().describe('Channel key, e.g. x, linkedin, reddit, producthunt, hackernews, email, influencer, meta_ads, google_ads, blog'),
+      kind: z.enum(['post', 'thread', 'ad', 'email', 'outreach', 'experiment', 'asset', 'seo', 'video']).describe('Type of action'),
+      title: z.string().describe('Short label for the queue'),
+      summary: z.string().describe('One line: what this does and why'),
+      content: z.string().describe('The actual ready-to-publish copy / script / ad text'),
+      cost_usd: z.number().default(0).describe('Estimated spend in USD if executed (0 for organic)'),
+      recipients: z.array(z.string()).optional().describe('Email recipients (only if the user already provided them; never invent addresses)'),
+      subject: z.string().optional().describe('Email subject line'),
+      targeting: z.string().optional().describe('Audience / targeting / community + posting norms'),
+      schedule: z.string().optional().describe('When to publish (e.g. "Tue 9am", "launch day")'),
+      rationale: z.string().optional().describe('Why this is high-leverage for the budget'),
+    },
+    async (args) => {
+      const c = getCampaignByProject(projectId);
+      if (!c) return { content: [{ type: 'text', text: 'No active campaign — cannot propose.' }], isError: true };
+      const cost = Math.max(0, Math.round((args.cost_usd || 0) * 100));
+      const remaining = c.budget_cents - c.spent_cents;
+      const overBudget = cost > remaining;
+      const a = createAction({
+        project_id: projectId, campaign_id: c.id, job_id: job.id,
+        channel: args.channel, kind: args.kind, title: args.title, summary: args.summary,
+        content: args.content, cost_cents: cost,
+        meta: { recipients: args.recipients, subject: args.subject, targeting: args.targeting,
+                schedule: args.schedule, rationale: args.rationale, overBudget },
+      });
+      log(job, 'action', `${channelDef(args.channel).label} · ${args.kind}${cost ? ` · $${(cost / 100).toFixed(2)}` : ''}`, args.title);
+      emitEvent({ type: 'finding', projectId, jobId: job.id });
+      const warn = overBudget ? ` WARNING: $${(cost / 100).toFixed(2)} exceeds remaining $${(remaining / 100).toFixed(2)} — it will be blocked at approval. Lower the cost or find a free alternative.` : '';
+      return { content: [{ type: 'text', text: `Queued "${args.title}" for approval (id ${a.id}).${warn}` }] };
+    },
+  );
+
+  const setStrategy = tool(
+    'set_strategy',
+    'Record the overall execution strategy and how the budget is allocated across channels. Call once.',
+    {
+      strategy: z.string().describe('The execution thesis: where to focus and why, given the budget'),
+      allocations: z.array(z.object({
+        channel: z.string(), budget_usd: z.number(), rationale: z.string().optional(),
+      })).describe('Budget split across channels (use 0 for organic-only at zero budget)'),
+    },
+    async (args) => {
+      const c = getCampaignByProject(projectId);
+      if (c) updateCampaign(c.id, { strategy: args.strategy });
+      addFinding({ project_id: projectId, job_id: job.id, category: 'channel', title: 'Budget allocation & strategy',
+        summary: args.strategy,
+        details: args.allocations.map((a) => `${channelDef(a.channel).label}: $${a.budget_usd}${a.rationale ? ` — ${a.rationale}` : ''}`).join('\n') });
+      log(job, 'status', 'Strategy set', args.strategy.slice(0, 140));
+      emitEvent({ type: 'finding', projectId, jobId: job.id });
+      return { content: [{ type: 'text', text: 'Strategy and allocations recorded.' }] };
+    },
+  );
+
   return createSdkMcpServer({
     name: 'marketer',
     version: '1.0.0',
-    tools: [saveFinding, createPdf, markResearchComplete, markMarketingComplete],
+    tools: [saveFinding, createPdf, markResearchComplete, markMarketingComplete, checkBudget, proposeAction, setStrategy],
   });
 }
 
 const TOOL_PREFIX = 'mcp__marketer__';
-const MCP_TOOLS = [
-  `${TOOL_PREFIX}save_finding`,
-  `${TOOL_PREFIX}create_pdf_report`,
-  `${TOOL_PREFIX}mark_research_complete`,
-  `${TOOL_PREFIX}mark_marketing_complete`,
-];
+const T = (n: string) => `${TOOL_PREFIX}${n}`;
+const RESEARCH_TOOLS = [T('save_finding'), T('create_pdf_report'), T('mark_research_complete')];
+const MARKETING_TOOLS = [T('save_finding'), T('create_pdf_report'), T('mark_marketing_complete')];
+const EXEC_TOOLS = [T('save_finding'), T('create_pdf_report'), T('check_budget'), T('propose_action'), T('set_strategy')];
 
 function researchPrompt(p: Project, attachments: string[]): string {
   return [
@@ -171,6 +245,75 @@ function marketingPrompt(p: Project, findings: string): string {
   ].filter(Boolean).join('\n');
 }
 
+// --- execution swarm -------------------------------------------------------
+
+// Which channel categories each swarm role works across.
+export const ROLE_CATEGORIES: Record<string, string[]> = {
+  strategist: ['organic', 'community', 'content', 'email', 'paid', 'influencer', 'automation'],
+  organic: ['organic', 'community', 'content'],
+  email: ['email'],
+  ads: ['paid'],
+  influencer: ['influencer'],
+  optimizer: ['organic', 'community', 'content', 'email', 'paid', 'influencer'],
+};
+export const ROLE_LABELS: Record<string, string> = {
+  strategist: 'Growth strategist — budget allocation & plan',
+  organic: 'Organic & community growth',
+  email: 'Email & direct outreach',
+  ads: 'Paid advertising',
+  influencer: 'Influencer & creator outreach',
+  optimizer: 'Optimizer — review & double-down',
+};
+
+function tacticsPolicy(p: Project, budgetLine: string): string {
+  return [
+    `You are one agent in a budget-aware growth-marketing SWARM executing the plan for this product:`,
+    `${p.prompt}${p.url ? ` (${p.url})` : ''}`,
+    ``,
+    `OPERATING RULES (non-negotiable):`,
+    `• APPROVAL-GATED: You PROPOSE actions with propose_action. Nothing is published or charged until a human approves it. Never claim you have already posted, sent, or spent anything.`,
+    `• BUDGET: ${budgetLine} Call check_budget before proposing anything with a cost. Never let your proposed paid spend exceed the remaining budget. If the budget is $0, be relentlessly resourceful with free tactics; for paid channels, hunt for free ad credits/coupons and propose $0 or near-zero experiments.`,
+    `• MAXIMIZE TRACTION PER DOLLAR with ingenious, high-leverage tactics tailored to THIS product's ideal customer.`,
+    `• ETHICS (hard limits): no spam, no fake accounts/followers/engagement, no fake reviews, no astroturfing, no bots that break platform ToS, no deceptive or misleading claims, no purchased email lists. Everything must be genuine and respect the audience. If a tactic would annoy people or risk an account ban, DO NOT propose it. Email must be opt-in friendly with a clear opt-out (CAN-SPAM/GDPR).`,
+    `• Write REAL, ready-to-publish copy in each action's \`content\` — not placeholders.`,
+  ].join('\n');
+}
+
+function executionPrompt(p: Project, role: string, budgetLine: string, channelLabels: string, findings: string): string {
+  const head = tacticsPolicy(p, budgetLine);
+  const ctx = `\nRESEARCH & PLAN CONTEXT:\n${findings}\n${p.summary ? `\nOverall strategy: ${p.summary}` : ''}\n\nChannels in scope for you: ${channelLabels || 'use your judgement'}\n`;
+  const jobByRole: Record<string, string> = {
+    strategist: [
+      `YOUR ROLE — Growth Strategist:`,
+      `1. Decide where to concentrate effort to get maximum traction for the budget, then call set_strategy with the thesis and a per-channel budget allocation.`,
+      `2. Propose 2–4 flagship, cross-channel actions that set up the campaign (e.g. launch sequencing, a hero asset, a referral/waitlist loop) via propose_action.`,
+      `Keep it sharp; the channel specialists will propose the bulk of the actions next.`,
+    ].join('\n'),
+    organic: [
+      `YOUR ROLE — Organic & Community Growth (cost $0):`,
+      `Propose a concrete batch of organic actions across your in-scope channels: launch posts, X/LinkedIn threads, Reddit/Hacker News/Product Hunt/Indie Hackers posts (respect each community's self-promotion norms — lead with genuine value, never spam), short-form video scripts, and a referral or waitlist loop.`,
+      `Each via propose_action with real ready-to-post copy. cost_usd = 0.`,
+    ].join('\n'),
+    email: [
+      `YOUR ROLE — Email & Direct Outreach:`,
+      `Define the target personas/segments, then propose a 2–3 step warm/cold outreach sequence and the key lifecycle emails. Use propose_action with kind "email"/"outreach", put the subject line in \`subject\` and ready-to-send copy in \`content\`. Describe WHO to target in \`targeting\`; do NOT invent real people's email addresses — leave recipients empty for the user to supply. Keep it opt-in friendly.`,
+    ].join('\n'),
+    ads: [
+      `YOUR ROLE — Paid Advertising (strictly budget-bound):`,
+      `Call check_budget first. Design paid experiments for your in-scope channels that fit the remaining budget. If budget is low/zero, first search the web for current free ad credits/coupons (Google Ads, Microsoft Advertising, Meta, etc.) and propose $0 or minimal-cost tests. For each experiment use propose_action kind "ad" with the hook, primary text, headline, CTA in \`content\`, audience in \`targeting\`, and a realistic cost_usd. The SUM of your proposed paid spend must stay within the remaining budget.`,
+    ].join('\n'),
+    influencer: [
+      `YOUR ROLE — Influencer & Creator Outreach:`,
+      `Use web search to identify 5–10 relevant micro/nano-creator archetypes and example creators/communities for this product. For each, propose_action with kind "outreach", channel "influencer", a personalized pitch in \`content\`, and a fair UGC/affiliate offer that fits the budget. No payment promises beyond budget.`,
+    ].join('\n'),
+    optimizer: [
+      `YOUR ROLE — Optimizer:`,
+      `Review the proposed and executed actions and any results. Propose improvements, sharper variants, and 2–3 new high-leverage experiments. Recommend what to scale and what to cut, all within budget.`,
+    ].join('\n'),
+  };
+  return `${head}\n${ctx}\n${jobByRole[role] || jobByRole.organic}\n\nWork efficiently and propose a solid batch, then stop.`;
+}
+
 export type RunArgs = {
   job: Job;
   attachments?: string[];
@@ -186,20 +329,41 @@ export async function runAgent(args: RunArgs): Promise<RunOutcome> {
   const outcome: RunOutcome = { researchComplete: false, marketingComplete: false };
   const server = buildTools(job, outcome);
 
+  const isExec = job.phase === 'execution';
   let prompt: string;
-  if (args.resumeSessionId) {
-    prompt = job.kind === 'research'
-      ? `Continue the research from where you left off. Review what you have already found and finish the remaining steps, then call mark_research_complete.`
-      : `Continue building the marketing plan from where you left off, then call mark_marketing_complete.`;
+  let mcpTools: string[];
+
+  if (isExec) {
+    mcpTools = EXEC_TOOLS;
+    const camp = getCampaignByProject(project.id);
+    const budgetLine = camp
+      ? `The hard budget cap is $${(camp.budget_cents / 100).toFixed(2)} ${camp.currency}, of which $${(camp.spent_cents / 100).toFixed(2)} is already committed.`
+      : `The budget is $0.`;
+    const cats = ROLE_CATEGORIES[job.kind] || ROLE_CATEGORIES.organic;
+    const selected: string[] = camp?.channels ? JSON.parse(camp.channels) : [];
+    const labels = CHANNELS
+      .filter((c) => cats.includes(c.category) && (selected.length === 0 || selected.includes(c.key)) && c.key !== 'webhook' && c.key !== 'smtp')
+      .map((c) => `${c.label} (${c.key})`).join(', ');
+    const findings = listFindings(project.id)
+      .map((f) => `- [${f.category}] ${f.title}: ${f.summary ?? ''}`).join('\n') || '(see saved findings)';
+    prompt = args.resumeSessionId
+      ? `Continue your role from where you left off; finish proposing the remaining actions, then stop.`
+      : executionPrompt(project, job.kind, budgetLine, labels, findings);
   } else if (job.kind === 'research') {
-    prompt = researchPrompt(project, args.attachments ?? []);
+    mcpTools = RESEARCH_TOOLS;
+    prompt = args.resumeSessionId
+      ? `Continue the research from where you left off. Review what you have already found and finish the remaining steps, then call mark_research_complete.`
+      : researchPrompt(project, args.attachments ?? []);
   } else {
-    prompt = marketingPrompt(project, args.findingsText ?? '(see saved findings)');
+    mcpTools = MARKETING_TOOLS;
+    prompt = args.resumeSessionId
+      ? `Continue building the marketing plan from where you left off, then call mark_marketing_complete.`
+      : marketingPrompt(project, args.findingsText ?? '(see saved findings)');
   }
 
   const options: any = {
     cwd: projectDir(project.id),
-    allowedTools: ['WebSearch', 'WebFetch', 'Read', 'Glob', 'Grep', ...MCP_TOOLS],
+    allowedTools: ['WebSearch', 'WebFetch', 'Read', 'Glob', 'Grep', ...mcpTools],
     disallowedTools: ['Bash', 'Write', 'Edit'],
     permissionMode: 'bypassPermissions',
     mcpServers: { marketer: server },
@@ -210,8 +374,10 @@ export async function runAgent(args: RunArgs): Promise<RunOutcome> {
   if (process.env.AGENT_MODEL) options.model = process.env.AGENT_MODEL;
   if (args.resumeSessionId) options.resume = args.resumeSessionId;
 
-  log(job, 'status', args.resumeSessionId ? 'Resumed' : 'Started',
-    job.kind === 'research' ? 'Scouring the web to understand the product and market' : 'Building the marketing strategy');
+  const startNote = isExec ? (ROLE_LABELS[job.kind] || 'Executing marketing actions')
+    : job.kind === 'research' ? 'Scouring the web to understand the product and market'
+    : 'Building the marketing strategy';
+  log(job, 'status', args.resumeSessionId ? 'Resumed' : 'Started', startNote);
   touchJob(job.id);
 
   for await (const message of query({ prompt, options })) {
