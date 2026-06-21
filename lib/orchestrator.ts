@@ -1,0 +1,148 @@
+import {
+  createProject, createJob, updateJob, getJob, getProject, listJobs,
+  listFindings, listAllActiveJobs, type Job,
+} from './db';
+import { emitEvent } from './events';
+import { runAgent } from './agent';
+
+// ---------------------------------------------------------------------------
+// Owns the lifecycle of every job. Holds an AbortController per running job so
+// the user can pause; persists session ids so a paused/interrupted job can be
+// resumed later (even after a server restart). Survives HMR via globalThis.
+// ---------------------------------------------------------------------------
+
+type Running = { abort: AbortController; pausedByUser: boolean };
+const g = globalThis as unknown as { __running?: Map<string, Running> };
+const running: Map<string, Running> = g.__running ?? (g.__running = new Map());
+
+export function isRunning(jobId: string) {
+  return running.has(jobId);
+}
+
+// Pause jobs the DB still thinks are active but which have gone silent — i.e.
+// orphaned by a server restart. A job is "alive" if it's in this process's
+// registry OR its heartbeat is recent (covers loops living in another bundle),
+// so a genuinely-running job is never wrongly paused.
+const STALE_MS = 30_000;
+export function reconcile() {
+  const t = Date.now();
+  for (const job of listAllActiveJobs()) {
+    if (running.has(job.id)) continue;
+    const beat = job.heartbeat ?? 0;
+    const ref = job.status === 'running' ? beat : Math.max(beat, job.created_at);
+    if (t - ref > STALE_MS) updateJob(job.id, { status: 'paused' });
+  }
+}
+
+function findingsText(projectId: string): string {
+  return listFindings(projectId)
+    .map((f) => `- [${f.category}] ${f.title}: ${f.summary ?? ''}${f.details ? ' — ' + f.details : ''}`)
+    .join('\n') || '(none recorded yet)';
+}
+
+// Drive a job to completion in the background, then chain to the next phase.
+async function drive(job: Job, opts: { resume?: boolean; attachments?: string[] } = {}) {
+  if (running.has(job.id)) return;
+  const abort = new AbortController();
+  running.set(job.id, { abort, pausedByUser: false });
+  updateJob(job.id, { status: 'running', error: null });
+  emitEvent({ type: 'job', projectId: job.project_id, jobId: job.id });
+
+  try {
+    const fresh = getJob(job.id)!;
+    const outcome = await runAgent({
+      job: fresh,
+      abort,
+      attachments: opts.attachments,
+      findingsText: job.kind === 'marketing' ? findingsText(job.project_id) : undefined,
+      resumeSessionId: opts.resume ? fresh.session_id ?? undefined : undefined,
+    });
+
+    const entry = running.get(job.id);
+    const pausedByUser = entry?.pausedByUser;
+    running.delete(job.id);
+
+    // Paused either via this process's abort, or via the DB flag (set by a
+    // pause request that landed in a different route bundle).
+    if (pausedByUser || abort.signal.aborted || getJob(job.id)?.status === 'paused') {
+      updateJob(job.id, { status: 'paused' });
+      emitEvent({ type: 'job', projectId: job.project_id, jobId: job.id });
+      return;
+    }
+
+    // Completed normally.
+    updateJob(job.id, { status: 'done', summary: outcome.finalText?.slice(0, 2000) ?? null });
+    emitEvent({ type: 'job', projectId: job.project_id, jobId: job.id });
+
+    // Research -> Marketing transition.
+    if (job.kind === 'research' && getProject(job.project_id)?.phase === 'marketing') {
+      const existing = listJobs(job.project_id).find((j) => j.kind === 'marketing');
+      if (!existing) {
+        const mkt = createJob({ project_id: job.project_id, kind: 'marketing', title: 'Active marketing — strategy & content', phase: 'marketing' });
+        emitEvent({ type: 'job', projectId: job.project_id, jobId: mkt.id });
+        drive(mkt); // fire and forget
+      }
+    }
+  } catch (err: any) {
+    running.delete(job.id);
+    if (abort.signal.aborted) {
+      updateJob(job.id, { status: 'paused' });
+    } else {
+      updateJob(job.id, { status: 'error', error: String(err?.message || err) });
+    }
+    emitEvent({ type: 'job', projectId: job.project_id, jobId: job.id });
+  }
+}
+
+// --- public API -------------------------------------------------------------
+
+// Create the project + its research job WITHOUT starting (lets the caller save
+// attachments into the project dir first).
+export function createNewProject(input: { prompt: string; url?: string; title?: string }) {
+  const title = input.title || deriveTitle(input.prompt, input.url);
+  const project = createProject({ title, prompt: input.prompt, url: input.url ?? null });
+  emitEvent({ type: 'project', projectId: project.id });
+  const job = createJob({ project_id: project.id, kind: 'research', title: 'Research — understand product, customer & market', phase: 'research' });
+  emitEvent({ type: 'job', projectId: project.id, jobId: job.id });
+  return { project, job };
+}
+
+export function launchJob(jobId: string, opts: { attachments?: string[] } = {}) {
+  const job = getJob(jobId);
+  if (job) drive(job, opts);
+}
+
+export function startProject(input: { prompt: string; url?: string; title?: string; attachments?: string[] }) {
+  const { project, job } = createNewProject(input);
+  drive(job, { attachments: input.attachments });
+  return project;
+}
+
+export function pauseJob(jobId: string) {
+  const job = getJob(jobId);
+  if (!job || !['queued', 'running'].includes(job.status)) return false;
+  // Write the pause to the DB first — this is what the running agent loop polls,
+  // so it works even if the loop lives in a different route bundle than us.
+  updateJob(jobId, { status: 'paused' });
+  emitEvent({ type: 'job', projectId: job.project_id, jobId });
+  // Fast-path: if the loop is in this process, abort it immediately too.
+  const entry = running.get(jobId);
+  if (entry) { entry.pausedByUser = true; entry.abort.abort(); }
+  return true;
+}
+
+export function resumeJob(jobId: string) {
+  const job = getJob(jobId);
+  if (!job || running.has(jobId)) return false;
+  if (!['paused', 'error', 'queued'].includes(job.status)) return false;
+  drive(job, { resume: Boolean(job.session_id) });
+  return true;
+}
+
+function deriveTitle(prompt: string, url?: string) {
+  if (url) {
+    try { return new URL(url).hostname.replace(/^www\./, ''); } catch { /* fall through */ }
+  }
+  const t = prompt.trim().split('\n')[0].slice(0, 60);
+  return t || 'Untitled marketing project';
+}
