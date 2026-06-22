@@ -134,6 +134,7 @@ export default function Page() {
     else if (action === 'approve') {
       if (d.status === 'failed') setError(`⚠ Publish failed: ${d.detail || 'unknown error'}`);
       else if (d.status === 'done') setNotice(`✅ ${d.detail || 'Published.'}`);
+      else if (d.status === 'sent') setNotice(`📤 ${d.detail || 'Sent to your automation — awaiting confirmation.'}`);
       else if (d.status === 'ready') setNotice(d.detail || 'Approved — ready to publish.');
     }
     if (currentId) loadDetail(currentId);
@@ -504,7 +505,7 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
   const allProposed = actions.filter((a) => ['proposed', 'revising'].includes(a.status));
   const proposed = autoOnly ? allProposed.filter((a) => a.auto) : allProposed;
   const hiddenManual = allProposed.length - proposed.length;
-  const live = actions.filter((a) => ['approved', 'done', 'ready'].includes(a.status));
+  const live = actions.filter((a) => ['approved', 'done', 'ready', 'sent'].includes(a.status));
   const failed = actions.filter((a) => a.status === 'failed');
   const rejected = actions.filter((a) => a.status === 'rejected');
   const pct = campaign.budget_cents > 0 ? Math.min(100, (campaign.spent_cents / campaign.budget_cents) * 100) : 0;
@@ -646,7 +647,12 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels }: {
         </>
       )}
 
-      {['ready', 'done'].includes(a.status) && a.result && <div className="action-result">{a.status === 'done' ? '✅ ' : '📋 '}{linkify(a.result)}</div>}
+      {['ready', 'done', 'sent'].includes(a.status) && a.result && (
+        <div className="action-result">
+          {a.status === 'done' ? '✅ ' : a.status === 'sent' ? '📤 ' : '📋 '}{linkify(a.result)}
+          {meta.live_url && <> · <a href={meta.live_url} target="_blank" rel="noreferrer">View live ↗</a></>}
+        </div>
+      )}
 
       {a.status === 'failed' && (
         <>

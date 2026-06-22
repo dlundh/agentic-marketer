@@ -87,19 +87,24 @@ async function sendEmail(smtp: Connector, action: ActionRow): Promise<{ status: 
   return { status: 'done', detail: `Email sent to ${to.length} recipient(s) (id ${info.messageId}).` };
 }
 
+const APP_BASE = process.env.APP_BASE_URL || 'http://localhost:4400';
+
 async function postWebhook(url: string, action: ActionRow): Promise<{ status: string; detail: string }> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      channel: action.channel, kind: action.kind, title: action.title,
+      id: action.id, channel: action.channel, kind: action.kind, title: action.title,
       summary: action.summary, content: action.content,
       meta: action.meta ? JSON.parse(action.meta) : null,
       cost_usd: action.cost_cents / 100,
+      // Your Zap/scenario can POST the result back here to confirm it went live.
+      callback_url: `${APP_BASE}/api/actions/${action.id}/result`,
     }),
   });
   if (!res.ok) throw new Error(`webhook responded ${res.status}`);
-  return { status: 'done', detail: `Sent to your automation webhook (HTTP ${res.status} — received). Note: this confirms delivery to Zapier/Make, not that the post went live — check the channel to confirm it published.` };
+  // "sent" (not "done"): delivered to the automation, but not yet confirmed live.
+  return { status: 'sent', detail: `Sent to your automation (HTTP ${res.status}). Awaiting confirmation it went live — add the callback step to your Zap for a confirmed link.` };
 }
 
 const safeJSON = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
@@ -193,7 +198,7 @@ export async function verifySmtp(secrets: any): Promise<{ ok: boolean; message: 
 }
 
 // Execute an approved action via the best available connected executor.
-export async function runAction(action: ActionRow): Promise<{ status: 'done' | 'ready' | 'failed'; detail: string }> {
+export async function runAction(action: ActionRow): Promise<{ status: 'done' | 'ready' | 'failed' | 'sent'; detail: string }> {
   // Account-setup tasks are always a human step — never auto-executed.
   if (action.kind === 'account') {
     const url = safeJSON(action.meta)?.signup_url;

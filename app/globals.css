@@ -236,6 +236,7 @@ a { color: var(--accent); }
 .as-approved { background: rgba(107,184,240,.18); color: var(--blue); }
 .as-done { background: rgba(61,220,151,.18); color: var(--green); }
 .as-ready { background: rgba(124,124,240,.18); color: var(--accent); }
+.as-sent { background: rgba(245,177,76,.18); color: var(--amber); }
 .as-rejected, .as-failed { background: rgba(240,107,107,.16); color: var(--red); }
 .action .cost { font-size: 11px; font-weight: 700; color: var(--amber); background: rgba(245,177,76,.12); padding: 2px 7px; border-radius: 6px; }
 .action-title { flex: 1; min-width: 0; font-weight: 650; font-size: 14px; }
