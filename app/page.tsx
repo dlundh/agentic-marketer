@@ -13,7 +13,7 @@ type Finding = { id: string; category: string | null; title: string; summary: st
 type FileRow = { id: string; name: string; mime: string; size: number; kind: string | null; job_id: string | null };
 type Project = { id: string; title: string; prompt: string; url: string | null; phase: string; status: string; summary: string | null; updated_at: number; jobs?: Job[] };
 type Campaign = { id: string; status: string; currency: string; budget_cents: number; spent_cents: number; channels: string | null; autonomy: string; strategy: string | null };
-type ActionItem = { id: string; channel: string; kind: string; title: string; summary: string | null; content: string | null; meta: string | null; cost_cents: number; status: string; result: string | null; job_id: string | null };
+type ActionItem = { id: string; channel: string; kind: string; title: string; summary: string | null; content: string | null; meta: string | null; cost_cents: number; status: string; result: string | null; job_id: string | null; auto?: boolean };
 type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[] };
 type Auth = { connected: boolean; method: string; detail: string };
 type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean };
@@ -207,6 +207,7 @@ export default function Page() {
                 onDecide={decide}
                 onRevise={revise}
                 onOptimize={optimize}
+                onOpenChannels={() => setShowChannels(true)}
                 anyExecLive={detail.jobs.some((j) => j.phase === 'execution' && j.live)}
               />
             ) : ['marketing', 'done'].includes(detail.project.phase) && !detail.jobs.some((j) => j.live) ? (
@@ -478,11 +479,14 @@ function linkify(text: string) {
   );
 }
 
-function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, anyExecLive }: {
+function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onOpenChannels, anyExecLive }: {
   campaign: Campaign; actions: ActionItem[]; onDecide: (id: string, a: 'approve' | 'reject') => void;
-  onRevise: (id: string, feedback: string) => void; onOptimize: () => void; anyExecLive: boolean;
+  onRevise: (id: string, feedback: string) => void; onOptimize: () => void; onOpenChannels: () => void; anyExecLive: boolean;
 }) {
-  const proposed = actions.filter((a) => ['proposed', 'revising'].includes(a.status));
+  const [autoOnly, setAutoOnly] = useState(true);
+  const allProposed = actions.filter((a) => ['proposed', 'revising'].includes(a.status));
+  const proposed = autoOnly ? allProposed.filter((a) => a.auto) : allProposed;
+  const hiddenManual = allProposed.length - proposed.length;
   const live = actions.filter((a) => ['approved', 'done', 'ready'].includes(a.status));
   const rejected = actions.filter((a) => a.status === 'rejected' || a.status === 'failed');
   const pct = campaign.budget_cents > 0 ? Math.min(100, (campaign.spent_cents / campaign.budget_cents) * 100) : 0;
@@ -507,12 +511,26 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, anyE
       </div>
 
       <div className="queue">
-        <div className="queue-col-head">Needs your approval · {proposed.length}</div>
-        {proposed.length === 0 && <div className="empty" style={{ padding: 18 }}>{anyExecLive ? 'Agents are still working…' : 'No actions waiting.'}</div>}
-        {proposed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} />)}
+        <div className="queue-head-row">
+          <div className="queue-col-head" style={{ margin: 0 }}>Needs your approval · {proposed.length}</div>
+          <label className="auto-toggle">
+            <input type="checkbox" checked={autoOnly} onChange={(e) => setAutoOnly(e.target.checked)} />
+            Only show actions I can auto-publish
+          </label>
+        </div>
+        {proposed.length === 0 && <div className="empty" style={{ padding: 18 }}>{anyExecLive ? 'Agents are still working…' : autoOnly && hiddenManual > 0 ? 'No auto-publishable actions yet — connect more channels under ⚙ Channels.' : 'No actions waiting.'}</div>}
+        {proposed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} />)}
+        {hiddenManual > 0 && (
+          <div className="note" style={{ fontSize: 12, marginTop: 8 }}>
+            {autoOnly ? `${hiddenManual} manual / unconnected action${hiddenManual === 1 ? '' : 's'} hidden. ` : ''}
+            {autoOnly
+              ? <a onClick={() => setAutoOnly(false)} style={{ cursor: 'pointer' }}>Show all</a>
+              : <a onClick={() => setAutoOnly(true)} style={{ cursor: 'pointer' }}>Hide manual ones</a>}
+          </div>
+        )}
 
         {live.length > 0 && <div className="queue-col-head" style={{ marginTop: 18 }}>Approved & executed · {live.length}</div>}
-        {live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} />)}
+        {live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} />)}
 
         {rejected.length > 0 && <div className="note" style={{ fontSize: 12, marginTop: 14 }}>{rejected.length} rejected/failed.</div>}
       </div>
@@ -520,8 +538,9 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, anyE
   );
 }
 
-function ActionCard({ a, onDecide, onRevise }: {
+function ActionCard({ a, onDecide, onRevise, onOpenChannels }: {
   a: ActionItem; onDecide: (id: string, x: 'approve' | 'reject') => void; onRevise: (id: string, feedback: string) => void;
+  onOpenChannels: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -529,6 +548,7 @@ function ActionCard({ a, onDecide, onRevise }: {
   const meta = (() => { try { return a.meta ? JSON.parse(a.meta) : {}; } catch { return {}; } })();
   const revisions: { feedback: string; ts: number }[] = meta.revisions || [];
   const revising = a.status === 'revising';
+  const auto = !!a.auto;
   const copy = () => { navigator.clipboard?.writeText(a.content || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); };
   const send = () => { if (!feedback.trim()) return; onRevise(a.id, feedback.trim()); setFeedback(''); };
 
@@ -539,6 +559,9 @@ function ActionCard({ a, onDecide, onRevise }: {
         <span className="job-kind kind-exec">{chLabel(a.channel)} · {a.kind}</span>
         {a.cost_cents > 0 && <span className="cost">{usd(a.cost_cents)}</span>}
         <div className="action-title">{a.title}</div>
+        {a.status === 'proposed' && (auto
+          ? <span className="auto-pill on" title="Approving this publishes it automatically">⚡ auto</span>
+          : <span className="auto-pill off" title="Connect this channel to auto-publish">manual</span>)}
         {revisions.length > 0 && <span className="rev-count" title={`${revisions.length} revision(s)`}>✎{revisions.length}</span>}
         <span className="caret">{open ? '▾' : '▸'}</span>
       </div>
@@ -578,9 +601,12 @@ function ActionCard({ a, onDecide, onRevise }: {
       {a.status === 'proposed' && (
         <>
           <div className="action-actions">
-            <button className="approve" onClick={() => onDecide(a.id, 'approve')}>✓ Approve{a.cost_cents > 0 ? ` (${usd(a.cost_cents)})` : ''}</button>
+            {auto
+              ? <button className="approve" onClick={() => onDecide(a.id, 'approve')}>✓ Approve &amp; publish{a.cost_cents > 0 ? ` (${usd(a.cost_cents)})` : ''}</button>
+              : <button className="approve" onClick={onOpenChannels} title="This channel isn’t connected">🔌 Connect to enable</button>}
             <button className="reject" onClick={() => onDecide(a.id, 'reject')}>✕ Reject</button>
           </div>
+          {!auto && <div className="note" style={{ fontSize: 11.5, padding: '0 14px 8px' }}>{a.kind === 'account' ? 'Manual account setup — can’t be auto-published.' : `Connect ${chLabel(a.channel)} under ⚙ Channels and this will publish on approve.`}</div>}
           <div className="feedback">
             <textarea
               placeholder="Adjust this action — e.g. “punchier hook, mention the free tier, target designers, drop the emoji”…"

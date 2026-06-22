@@ -6,7 +6,7 @@ import {
 } from './db';
 import { emitEvent } from './events';
 import { runAgent, runRevision, runAccountKit, ROLE_LABELS } from './agent';
-import { runAction, channelDef, CHANNELS } from './connectors';
+import { runAction, channelDef, CHANNELS, isAutoExecutable } from './connectors';
 
 // ---------------------------------------------------------------------------
 // Owns the lifecycle of every job. Holds an AbortController per running job so
@@ -223,6 +223,12 @@ export function launchOptimizer(projectId: string) {
 export async function approveAction(actionId: string): Promise<{ ok: boolean; error?: string }> {
   const a = getAction(actionId);
   if (!a || a.status !== 'proposed') return { ok: false, error: 'Action is not awaiting approval.' };
+  // Never let Approve produce a "now do it yourself" task: require a real executor.
+  if (!isAutoExecutable(a)) {
+    return { ok: false, error: a.kind === 'account'
+      ? 'This is a manual account-setup task and can’t be auto-published. Connect your existing account under ⚙ Channels, then reject this.'
+      : `${channelDef(a.channel).label} isn’t connected, so this can’t auto-publish. Connect it under ⚙ Channels (or reject this action).` };
+  }
   if (a.cost_cents > 0 && !reserveSpend(a.campaign_id, a.cost_cents)) {
     const c = getCampaign(a.campaign_id);
     const remaining = c ? (c.budget_cents - c.spent_cents) / 100 : 0;

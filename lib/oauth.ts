@@ -32,7 +32,9 @@ const X_SCOPES = 'tweet.read tweet.write users.read offline.access';
 
 export function xAuthorizeUrl(clientId: string, redirectUri: string, state: string, challenge: string): string {
   const q = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: redirectUri, scope: X_SCOPES, state, code_challenge: challenge, code_challenge_method: 'S256' });
-  return `https://twitter.com/i/oauth2/authorize?${q.toString()}`;
+  // Use x.com (not twitter.com) — the user's login session is on x.com, so the
+  // twitter.com authorize page wrongly reports "you have to be logged in".
+  return `https://x.com/i/oauth2/authorize?${q.toString()}`;
 }
 function xAuthHeader(clientId: string, clientSecret?: string): Record<string, string> {
   return clientSecret ? { Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64') } : {};

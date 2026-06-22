@@ -4,6 +4,7 @@ import {
   getCampaignByProject, listActions,
 } from '@/lib/db';
 import { isRunning } from '@/lib/orchestrator';
+import { isAutoExecutable } from '@/lib/connectors';
 
 export const runtime = 'nodejs';
 
@@ -19,7 +20,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }));
 
   const campaign = getCampaignByProject(id);
-  const actions = campaign ? listActions(campaign.id) : [];
+  const actions = (campaign ? listActions(campaign.id) : []).map((a) => ({ ...a, auto: isAutoExecutable(a) }));
 
   return NextResponse.json({
     project,

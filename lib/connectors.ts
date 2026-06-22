@@ -104,6 +104,21 @@ async function postWebhook(url: string, action: ActionRow): Promise<{ status: st
 
 const safeJSON = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
+// Will approving this action actually publish it automatically (vs. need a
+// manual human step)? Used to gate Approve and to hide manual-only actions.
+export function isAutoExecutable(action: ActionRow): boolean {
+  if (action.kind === 'account') return false; // account creation is always human
+  const def = channelDef(action.channel);
+  const own = getConnector(action.channel);
+  const ownSecrets = own?.connected ? safeJSON(own.secrets) : null;
+  if (['mastodon', 'x', 'reddit'].includes(action.channel) && ownSecrets?.access_token) return true; // native API
+  if (ownSecrets?.url) return true; // per-channel webhook
+  const emailish = def.executor === 'smtp' || ['email', 'outreach'].includes(action.kind);
+  if (emailish && getConnector('smtp')?.connected) return true; // SMTP
+  if (getConnector('webhook')?.connected) return true; // global automation webhook
+  return false;
+}
+
 // Find the target subreddit for a Reddit action (meta, targeting, or content).
 function subredditOf(action: ActionRow): string | null {
   const meta = safeJSON(action.meta) || {};

@@ -220,6 +220,12 @@ a { color: var(--accent); }
 
 /* Action queue */
 .queue-col-head { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 10px; font-weight: 700; }
+.queue-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.auto-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.auto-toggle input { accent-color: var(--accent); }
+.auto-pill { font-size: 9px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; padding: 2px 7px; border-radius: 5px; white-space: nowrap; }
+.auto-pill.on { background: rgba(61,220,151,.16); color: var(--green); }
+.auto-pill.off { background: rgba(255,255,255,.06); color: var(--muted); }
 .action { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); margin-bottom: 8px; overflow: hidden; }
 .action.a-proposed { border-color: rgba(245,177,76,.4); }
 .action.a-done { border-color: rgba(61,220,151,.35); }
