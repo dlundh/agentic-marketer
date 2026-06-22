@@ -245,21 +245,23 @@ export async function approveAction(actionId: string): Promise<{ ok: boolean; er
       ? 'This is a manual account-setup task and can’t be auto-published. Connect your existing account under ⚙ Channels, then reject this.'
       : `${channelDef(a.channel).label} isn’t connected, so this can’t auto-publish. Connect it under ⚙ Channels (or reject this action).` };
   }
-  // Guard: don't publish a video script / storyboard as a text post.
+  // Guard: don't publish a video script / storyboard as a text post. Record the
+  // reason on the action so it's visible inline (not just a transient banner).
   const SCRIPT_MARKERS = /on-screen text:|voice ?over|\bVO:|b-roll|\*\*format:?\*\*|hook \(0|talking-to-camera|\b9:16\b|\(\d\/\d\)/i;
   const textChannel = ['x', 'mastodon', 'threads', 'linkedin', 'reddit'].includes(a.channel);
   if (textChannel && a.content && SCRIPT_MARKERS.test(a.content)) {
-    return { ok: false, error: 'This reads like a video script, not a ready-to-post message. Use the feedback box (e.g. “rewrite as a natural tweet thread, no stage directions”), then approve.' };
-  }
-  // Require hashtags on hashtag-driven social channels (not Reddit/HN).
-  const HASHTAG_CHANNELS = ['x', 'mastodon', 'threads', 'instagram', 'tiktok', 'facebook', 'linkedin'];
-  if (HASHTAG_CHANNELS.includes(a.channel) && a.content && !/#[A-Za-z][A-Za-z0-9_]{1,}/.test(a.content)) {
-    return { ok: false, error: 'This post has no hashtags, so it won’t reach an audience. Add a few relevant ones — e.g. feedback: “add 3 relevant hashtags” — then approve.' };
+    const msg = 'This reads like a video script, not a ready-to-post message. Use the feedback box (e.g. “rewrite as a natural tweet thread, no stage directions”), then approve.';
+    updateAction(actionId, { result: msg });
+    emitEvent({ type: 'finding', projectId: a.project_id });
+    return { ok: false, error: msg };
   }
   if (a.cost_cents > 0 && !reserveSpend(a.campaign_id, a.cost_cents)) {
     const c = getCampaign(a.campaign_id);
     const remaining = c ? (c.budget_cents - c.spent_cents) / 100 : 0;
-    return { ok: false, error: `Blocked: $${(a.cost_cents / 100).toFixed(2)} exceeds the remaining budget of $${remaining.toFixed(2)}.` };
+    const msg = `Blocked: $${(a.cost_cents / 100).toFixed(2)} exceeds the remaining budget of $${remaining.toFixed(2)}.`;
+    updateAction(actionId, { result: msg });
+    emitEvent({ type: 'finding', projectId: a.project_id });
+    return { ok: false, error: msg };
   }
   updateAction(actionId, { status: 'approved' });
   emitEvent({ type: 'finding', projectId: a.project_id });

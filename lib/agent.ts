@@ -281,7 +281,7 @@ function tacticsPolicy(p: Project, budgetLine: string): string {
     `   – Reddit: a genuine post (clear title + body) that respects the subreddit's norms; not an ad.`,
     `   – A short-form VIDEO script/storyboard is a different deliverable and is NOT a text post. Only create one if a video channel (TikTok/YouTube) is connected; never post a script as an X/Mastodon/Reddit text post.`,
     `   – If you wouldn't be proud to see it on the brand's own feed verbatim, rewrite it.`,
-    `• HASHTAGS for reach: every X, Mastodon, Threads, Instagram and TikTok post MUST include a small set (about 2–4) of relevant, targeted hashtags — mix niche tags (e.g. #unsignedartist, #indiemusic) with a broader-reach one. On a thread, put the hashtags on the final tweet. Never hashtag-stuff (no walls of 10+). Reddit and Hacker News: NO hashtags (they read as spam there).`,
+    `• HASHTAGS (always automatic — never ask the user): ALWAYS include a small set (about 2–4) of relevant, targeted hashtags on every X, Mastodon, Threads, Instagram and TikTok post by default — mix niche tags (e.g. #unsignedartist, #indiemusic) with a broader-reach one. On a thread, put the hashtags on the final tweet. Never hashtag-stuff (no walls of 10+). If the user specified particular hashtags, use those. Reddit and Hacker News: NO hashtags (they read as spam there).`,
   ].join('\n');
 }
 

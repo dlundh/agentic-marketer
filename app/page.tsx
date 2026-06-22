@@ -626,6 +626,7 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels }: {
 
       {a.status === 'proposed' && (
         <>
+          {a.result && <div className="action-result" style={{ color: 'var(--amber)' }}>⚠ {linkify(a.result)}</div>}
           <div className="action-actions">
             {auto
               ? <button className="approve" onClick={approve} disabled={acting}>{acting ? <><span className="spin">⟳</span> Publishing…</> : <>✓ Approve &amp; publish{a.cost_cents > 0 ? ` (${usd(a.cost_cents)})` : ''}</>}</button>

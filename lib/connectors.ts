@@ -99,7 +99,7 @@ async function postWebhook(url: string, action: ActionRow): Promise<{ status: st
     }),
   });
   if (!res.ok) throw new Error(`webhook responded ${res.status}`);
-  return { status: 'done', detail: `Handed to automation webhook (HTTP ${res.status}). Your automation will publish it.` };
+  return { status: 'done', detail: `Sent to your automation webhook (HTTP ${res.status} — received). Note: this confirms delivery to Zapier/Make, not that the post went live — check the channel to confirm it published.` };
 }
 
 const safeJSON = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
