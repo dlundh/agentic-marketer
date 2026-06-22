@@ -499,7 +499,8 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
   const proposed = autoOnly ? allProposed.filter((a) => a.auto) : allProposed;
   const hiddenManual = allProposed.length - proposed.length;
   const live = actions.filter((a) => ['approved', 'done', 'ready'].includes(a.status));
-  const rejected = actions.filter((a) => a.status === 'rejected' || a.status === 'failed');
+  const failed = actions.filter((a) => a.status === 'failed');
+  const rejected = actions.filter((a) => a.status === 'rejected');
   const pct = campaign.budget_cents > 0 ? Math.min(100, (campaign.spent_cents / campaign.budget_cents) * 100) : 0;
 
   return (
@@ -543,10 +544,13 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
           </div>
         )}
 
+        {failed.length > 0 && <div className="queue-col-head" style={{ marginTop: 18, color: 'var(--red)' }}>⚠ Failed — needs attention · {failed.length}</div>}
+        {failed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} />)}
+
         {live.length > 0 && <div className="queue-col-head" style={{ marginTop: 18 }}>Approved & executed · {live.length}</div>}
         {live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} />)}
 
-        {rejected.length > 0 && <div className="note" style={{ fontSize: 12, marginTop: 14 }}>{rejected.length} rejected/failed.</div>}
+        {rejected.length > 0 && <div className="note" style={{ fontSize: 12, marginTop: 14 }}>{rejected.length} rejected.</div>}
       </div>
     </div>
   );
@@ -634,6 +638,17 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels }: {
       )}
 
       {['ready', 'done'].includes(a.status) && a.result && <div className="action-result">{a.status === 'done' ? '✅ ' : '📋 '}{linkify(a.result)}</div>}
+
+      {a.status === 'failed' && (
+        <>
+          {a.result && <div className="action-result" style={{ color: 'var(--red)' }}>⚠ {linkify(a.result)}</div>}
+          <div className="action-actions">
+            {auto && <button className="approve" onClick={() => onDecide(a.id, 'approve')}>↻ Retry</button>}
+            {!auto && <button className="approve" onClick={onOpenChannels} title="This channel isn’t connected">🔌 Connect to enable</button>}
+            <button className="reject" onClick={() => onDecide(a.id, 'reject')}>✕ Dismiss</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

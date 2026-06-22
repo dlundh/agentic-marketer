@@ -238,7 +238,7 @@ export function launchOptimizer(projectId: string) {
 // best connected channel. Returns an error string if it would bust the budget.
 export async function approveAction(actionId: string): Promise<{ ok: boolean; error?: string }> {
   const a = getAction(actionId);
-  if (!a || a.status !== 'proposed') return { ok: false, error: 'Action is not awaiting approval.' };
+  if (!a || !['proposed', 'failed'].includes(a.status)) return { ok: false, error: 'Action is not awaiting approval.' };
   // Never let Approve produce a "now do it yourself" task: require a real executor.
   if (!isAutoExecutable(a)) {
     return { ok: false, error: a.kind === 'account'
