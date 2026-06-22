@@ -251,6 +251,11 @@ export async function approveAction(actionId: string): Promise<{ ok: boolean; er
   if (textChannel && a.content && SCRIPT_MARKERS.test(a.content)) {
     return { ok: false, error: 'This reads like a video script, not a ready-to-post message. Use the feedback box (e.g. “rewrite as a natural tweet thread, no stage directions”), then approve.' };
   }
+  // Require hashtags on hashtag-driven social channels (not Reddit/HN).
+  const HASHTAG_CHANNELS = ['x', 'mastodon', 'threads', 'instagram', 'tiktok', 'facebook', 'linkedin'];
+  if (HASHTAG_CHANNELS.includes(a.channel) && a.content && !/#[A-Za-z][A-Za-z0-9_]{1,}/.test(a.content)) {
+    return { ok: false, error: 'This post has no hashtags, so it won’t reach an audience. Add a few relevant ones — e.g. feedback: “add 3 relevant hashtags” — then approve.' };
+  }
   if (a.cost_cents > 0 && !reserveSpend(a.campaign_id, a.cost_cents)) {
     const c = getCampaign(a.campaign_id);
     const remaining = c ? (c.budget_cents - c.spent_cents) / 100 : 0;

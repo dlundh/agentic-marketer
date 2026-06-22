@@ -281,6 +281,7 @@ function tacticsPolicy(p: Project, budgetLine: string): string {
     `   – Reddit: a genuine post (clear title + body) that respects the subreddit's norms; not an ad.`,
     `   – A short-form VIDEO script/storyboard is a different deliverable and is NOT a text post. Only create one if a video channel (TikTok/YouTube) is connected; never post a script as an X/Mastodon/Reddit text post.`,
     `   – If you wouldn't be proud to see it on the brand's own feed verbatim, rewrite it.`,
+    `• HASHTAGS for reach: every X, Mastodon, Threads, Instagram and TikTok post MUST include a small set (about 2–4) of relevant, targeted hashtags — mix niche tags (e.g. #unsignedartist, #indiemusic) with a broader-reach one. On a thread, put the hashtags on the final tweet. Never hashtag-stuff (no walls of 10+). Reddit and Hacker News: NO hashtags (they read as spam there).`,
   ].join('\n');
 }
 
@@ -496,6 +497,7 @@ export async function runRevision(opts: { action: ActionRow; feedback: string; a
     ``,
     `USER FEEDBACK / ADJUSTMENT:\n${feedback}`,
     ``,
+    `Keep it channel-native and ready-to-post (no stage directions). For X/Mastodon/Threads/Instagram/TikTok posts, ensure 2–4 relevant hashtags for reach (on the final tweet of a thread); no hashtags for Reddit/Hacker News.`,
     `Apply the feedback: preserve what works, change what they ask for. If the feedback needs fresh facts, you may use web search. Then call submit_revision exactly once with the complete revised action.`,
   ].filter(Boolean).join('\n');
 
