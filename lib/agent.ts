@@ -9,7 +9,8 @@ import {
 } from './db';
 import { emitEvent } from './events';
 import { renderPdf, type PdfSection } from './pdf';
-import { channelDef, CHANNELS } from './connectors';
+import { channelDef, CHANNELS, autoChannels } from './connectors';
+import { listActions } from './db';
 
 export function projectDir(projectId: string) {
   const dir = path.join(DATA_DIR, 'projects', projectId);
@@ -279,9 +280,13 @@ function tacticsPolicy(p: Project, budgetLine: string): string {
   ].join('\n');
 }
 
-function executionPrompt(p: Project, role: string, budgetLine: string, channelLabels: string, findings: string): string {
+function executionPrompt(p: Project, role: string, budgetLine: string, channelLabels: string, findings: string, existing: string[] = []): string {
   const head = tacticsPolicy(p, budgetLine);
-  const ctx = `\nRESEARCH & PLAN CONTEXT:\n${findings}\n${p.summary ? `\nOverall strategy: ${p.summary}` : ''}\n\nChannels in scope for you: ${channelLabels || 'use your judgement'}\n`;
+  const scopeLine = channelLabels
+    ? `CONNECTED CHANNELS — you may ONLY propose actions for these (every action must be auto-publishable): ${channelLabels}. Never propose for any channel not in this list.`
+    : `No channels in your area are connected yet, so nothing you propose could be published. Do NOT propose any actions — instead state briefly that the user should connect a channel under "⚙ Channels" to enable this.`;
+  const dupeLine = existing.length ? `\nThese actions already exist — propose NEW, materially different ones, do not repeat them: ${existing.slice(0, 40).join(' | ')}.` : '';
+  const ctx = `\nRESEARCH & PLAN CONTEXT:\n${findings}\n${p.summary ? `\nOverall strategy: ${p.summary}` : ''}\n\n${scopeLine}${dupeLine}\n`;
   const jobByRole: Record<string, string> = {
     strategist: [
       `YOUR ROLE — Growth Strategist:`,
@@ -340,15 +345,15 @@ export async function runAgent(args: RunArgs): Promise<RunOutcome> {
       ? `The hard budget cap is $${(camp.budget_cents / 100).toFixed(2)} ${camp.currency}, of which $${(camp.spent_cents / 100).toFixed(2)} is already committed.`
       : `The budget is $0.`;
     const cats = ROLE_CATEGORIES[job.kind] || ROLE_CATEGORIES.organic;
-    const selected: string[] = camp?.channels ? JSON.parse(camp.channels) : [];
-    const labels = CHANNELS
-      .filter((c) => cats.includes(c.category) && (selected.length === 0 || selected.includes(c.key)) && c.key !== 'webhook' && c.key !== 'smtp')
-      .map((c) => `${c.label} (${c.key})`).join(', ');
+    const connected = autoChannels(); // only connected/auto-publishable channels
+    const inScope = CHANNELS.filter((c) => cats.includes(c.category) && connected.includes(c.key) && c.key !== 'webhook' && c.key !== 'smtp');
+    const labels = inScope.map((c) => `${c.label} (${c.key})`).join(', ');
+    const existing = camp ? listActions(camp.id).filter((a) => inScope.some((c) => c.key === a.channel)).map((a) => a.title) : [];
     const findings = listFindings(project.id)
       .map((f) => `- [${f.category}] ${f.title}: ${f.summary ?? ''}`).join('\n') || '(see saved findings)';
     prompt = args.resumeSessionId
-      ? `Continue your role from where you left off; finish proposing the remaining actions, then stop.`
-      : executionPrompt(project, job.kind, budgetLine, labels, findings);
+      ? `Continue your role from where you left off; propose only for connected channels (${labels || 'none — stop'}), then stop.`
+      : executionPrompt(project, job.kind, budgetLine, labels, findings, existing);
   } else if (job.kind === 'research') {
     mcpTools = RESEARCH_TOOLS;
     prompt = args.resumeSessionId

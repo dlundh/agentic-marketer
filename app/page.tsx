@@ -150,6 +150,16 @@ export default function Page() {
     loadDetail(currentId);
   };
 
+  const generate = async () => {
+    if (!currentId) return;
+    const res = await fetch(`/api/projects/${currentId}/campaign`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generate' }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok && d.error) setError(d.error);
+    loadDetail(currentId);
+  };
+
   const createAccount = async (channel: string): Promise<string | null> => {
     if (!currentId) return 'Open a project first.';
     const res = await fetch(`/api/projects/${currentId}/account`, {
@@ -207,6 +217,7 @@ export default function Page() {
                 onDecide={decide}
                 onRevise={revise}
                 onOptimize={optimize}
+                onGenerate={generate}
                 onOpenChannels={() => setShowChannels(true)}
                 anyExecLive={detail.jobs.some((j) => j.phase === 'execution' && j.live)}
               />
@@ -479,9 +490,9 @@ function linkify(text: string) {
   );
 }
 
-function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onOpenChannels, anyExecLive }: {
+function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGenerate, onOpenChannels, anyExecLive }: {
   campaign: Campaign; actions: ActionItem[]; onDecide: (id: string, a: 'approve' | 'reject') => void;
-  onRevise: (id: string, feedback: string) => void; onOptimize: () => void; onOpenChannels: () => void; anyExecLive: boolean;
+  onRevise: (id: string, feedback: string) => void; onOptimize: () => void; onGenerate: () => void; onOpenChannels: () => void; anyExecLive: boolean;
 }) {
   const [autoOnly, setAutoOnly] = useState(true);
   const allProposed = actions.filter((a) => ['proposed', 'revising'].includes(a.status));
@@ -502,7 +513,10 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onOp
               <span className="of"> of {usd(campaign.budget_cents)}</span>
             </div>
           </div>
-          <button className="iconbtn" onClick={onOptimize} disabled={anyExecLive} title="Run an optimizer pass">✨ Optimize</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="iconbtn" onClick={onGenerate} disabled={anyExecLive} title="Generate fresh actions for your connected channels">✨ Generate actions</button>
+            <button className="iconbtn" onClick={onOptimize} disabled={anyExecLive} title="Review & improve existing actions">⚡ Optimize</button>
+          </div>
         </div>
         {campaign.budget_cents > 0 && <div className="meter"><div className="meter-fill" style={{ width: `${pct}%` }} /></div>}
         <div className="note" style={{ fontSize: 12, marginTop: 8 }}>

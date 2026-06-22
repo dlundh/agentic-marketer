@@ -104,6 +104,25 @@ async function postWebhook(url: string, action: ActionRow): Promise<{ status: st
 
 const safeJSON = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
+// The set of channel keys that can auto-publish right now (connected natively,
+// via a per-channel webhook, the global webhook, or SMTP). Drives swarm scoping.
+export function autoChannels(): string[] {
+  const webhookOn = !!getConnector('webhook')?.connected;
+  const smtpOn = !!getConnector('smtp')?.connected;
+  const keys: string[] = [];
+  for (const ch of CHANNELS) {
+    if (ch.key === 'webhook' || ch.key === 'smtp') continue;
+    const own = getConnector(ch.key);
+    const s = own?.connected ? safeJSON(own.secrets) : null;
+    const native = ['mastodon', 'x', 'reddit'].includes(ch.key) && s?.access_token;
+    const ownHook = !!s?.url;
+    const viaWebhook = webhookOn && ch.executor === 'webhook';
+    const viaSmtp = smtpOn && ch.executor === 'smtp';
+    if (native || ownHook || viaWebhook || viaSmtp) keys.push(ch.key);
+  }
+  return keys;
+}
+
 // Will approving this action actually publish it automatically (vs. need a
 // manual human step)? Used to gate Approve and to hide manual-only actions.
 export function isAutoExecutable(action: ActionRow): boolean {

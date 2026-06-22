@@ -1,16 +1,20 @@
 import { NextResponse } from 'next/server';
-import { launchCampaign, launchOptimizer } from '@/lib/orchestrator';
+import { launchCampaign, launchOptimizer, generateActions } from '@/lib/orchestrator';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// Launch the execution swarm for a project (or, with {action:'optimize'}, add an optimizer pass).
+// Launch the swarm, or {action:'optimize'} / {action:'generate'} on an existing campaign.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
 
   if (body.action === 'optimize') {
     return NextResponse.json({ ok: launchOptimizer(id) });
+  }
+  if (body.action === 'generate') {
+    const r = generateActions(id);
+    return NextResponse.json(r, { status: r.ok ? 200 : 400 });
   }
 
   const budgetCents = Math.max(0, Math.round(Number(body.budget_usd || 0) * 100));

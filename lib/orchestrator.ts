@@ -6,7 +6,7 @@ import {
 } from './db';
 import { emitEvent } from './events';
 import { runAgent, runRevision, runAccountKit, ROLE_LABELS } from './agent';
-import { runAction, channelDef, CHANNELS, isAutoExecutable } from './connectors';
+import { runAction, channelDef, CHANNELS, isAutoExecutable, autoChannels } from './connectors';
 
 // ---------------------------------------------------------------------------
 // Owns the lifecycle of every job. Holds an AbortController per running job so
@@ -181,18 +181,34 @@ export function launchCampaign(projectId: string, opts: { budget_cents: number; 
   return campaign;
 }
 
-function spawnSpecialists(projectId: string) {
-  const campaign = getCampaignByProject(projectId);
-  if (!campaign) return;
-  const channels: string[] = campaign.channels ? JSON.parse(campaign.channels) : [];
-  const roles = rolesForChannels(channels);
+// Spawn specialist agents for the given roles. Skips a role if one already
+// exists (initial fan-out) or is currently running (avoid concurrent dupes).
+function spawnRoles(projectId: string, roles: string[], skipIfExisting: boolean) {
   const existing = listJobs(projectId);
   for (const role of roles) {
-    if (existing.some((j) => j.phase === 'execution' && j.kind === role)) continue;
+    const sameRole = existing.filter((j) => j.phase === 'execution' && j.kind === role);
+    if (skipIfExisting && sameRole.length) continue;
+    if (sameRole.some((j) => j.status === 'running' || j.status === 'queued')) continue;
     const job = createJob({ project_id: projectId, kind: role, title: ROLE_LABELS[role] || role, phase: 'execution' });
     emitEvent({ type: 'job', projectId, jobId: job.id });
     drive(job); // specialists run concurrently
   }
+}
+
+// Initial fan-out after the strategist — scoped to currently-connected channels.
+function spawnSpecialists(projectId: string) {
+  spawnRoles(projectId, rolesForChannels(autoChannels()), true);
+}
+
+// On-demand: generate a fresh batch of actions for the currently-connected
+// channels (e.g. after the user connects a new account).
+export function generateActions(projectId: string): { ok: boolean; error?: string; roles?: string[] } {
+  if (!getCampaignByProject(projectId)) return { ok: false, error: 'No active campaign.' };
+  const channels = autoChannels();
+  if (!channels.length) return { ok: false, error: 'Connect a channel under ⚙ Channels first, then generate.' };
+  const roles = rolesForChannels(channels);
+  spawnRoles(projectId, roles, false);
+  return { ok: true, roles };
 }
 
 // Prepare a name-matched brand account for a channel (agent does availability +
