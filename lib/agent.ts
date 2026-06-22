@@ -276,7 +276,11 @@ function tacticsPolicy(p: Project, budgetLine: string): string {
     `• BUDGET: ${budgetLine} Call check_budget before proposing anything with a cost. Never let your proposed paid spend exceed the remaining budget. If the budget is $0, be relentlessly resourceful with free tactics; for paid channels, hunt for free ad credits/coupons and propose $0 or near-zero experiments.`,
     `• MAXIMIZE TRACTION PER DOLLAR with ingenious, high-leverage tactics tailored to THIS product's ideal customer.`,
     `• ETHICS (hard limits): no spam, no fake accounts/followers/engagement, no fake reviews, no astroturfing, no bots that break platform ToS, no deceptive or misleading claims, no purchased email lists. Everything must be genuine and respect the audience. If a tactic would annoy people or risk an account ban, DO NOT propose it. Email must be opt-in friendly with a clear opt-out (CAN-SPAM/GDPR).`,
-    `• Write REAL, ready-to-publish copy in each action's \`content\` — not placeholders.`,
+    `• CHANNEL-NATIVE & READY-TO-POST: each action's \`content\` must be EXACTLY what should appear on that channel, posted as-is. This is critical:`,
+    `   – X / Twitter / Mastodon / Threads: write a real tweet, or a real tweet-thread where each idea is a natural tweet. Conversational and human. NO stage directions, NO production notes (no "Format:", "On-screen text:", "VO:", "B-roll", "HOOK (0–3s)"), and NO manual "(1/6)" numbering — threads are split automatically.`,
+    `   – Reddit: a genuine post (clear title + body) that respects the subreddit's norms; not an ad.`,
+    `   – A short-form VIDEO script/storyboard is a different deliverable and is NOT a text post. Only create one if a video channel (TikTok/YouTube) is connected; never post a script as an X/Mastodon/Reddit text post.`,
+    `   – If you wouldn't be proud to see it on the brand's own feed verbatim, rewrite it.`,
   ].join('\n');
 }
 
@@ -296,8 +300,9 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
     ].join('\n'),
     organic: [
       `YOUR ROLE — Organic & Community Growth (cost $0):`,
-      `Propose a concrete batch of organic actions across your in-scope channels: launch posts, X/LinkedIn threads, Reddit/Hacker News/Product Hunt/Indie Hackers posts (respect each community's self-promotion norms — lead with genuine value, never spam), short-form video scripts, and a referral or waitlist loop.`,
-      `Each via propose_action with real ready-to-post copy. cost_usd = 0.`,
+      `Propose a concrete batch of organic actions ONLY for your connected in-scope channels, with content written natively for each (see the channel-native rule above). For X/Mastodon: punchy real tweets and tweet-threads. For Reddit: genuine value-first posts that fit the subreddit.`,
+      `Do NOT propose video scripts, storyboards, or anything with stage directions as text posts. Only include a short-form video script if a video channel is connected.`,
+      `Each via propose_action with real, ready-to-post copy (kind "post" or "thread" for X/Mastodon). cost_usd = 0.`,
     ].join('\n'),
     email: [
       `YOUR ROLE — Email & Direct Outreach:`,

@@ -125,11 +125,17 @@ export default function Page() {
   };
 
   const decide = async (actionId: string, action: 'approve' | 'reject') => {
+    setError(null); setNotice(null);
     const res = await fetch(`/api/actions/${actionId}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
     });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok && d.error) setError(d.error);
+    if (!res.ok) setError(d.error || 'Action failed.');
+    else if (action === 'approve') {
+      if (d.status === 'failed') setError(`⚠ Publish failed: ${d.detail || 'unknown error'}`);
+      else if (d.status === 'done') setNotice(`✅ ${d.detail || 'Published.'}`);
+      else if (d.status === 'ready') setNotice(d.detail || 'Approved — ready to publish.');
+    }
     if (currentId) loadDetail(currentId);
   };
 
@@ -563,10 +569,12 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels }: {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [acting, setActing] = useState(false);
   const meta = (() => { try { return a.meta ? JSON.parse(a.meta) : {}; } catch { return {}; } })();
   const revisions: { feedback: string; ts: number }[] = meta.revisions || [];
   const revising = a.status === 'revising';
   const auto = !!a.auto;
+  const approve = async () => { setActing(true); await onDecide(a.id, 'approve'); setActing(false); };
   const copy = () => { navigator.clipboard?.writeText(a.content || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); };
   const send = () => { if (!feedback.trim()) return; onRevise(a.id, feedback.trim()); setFeedback(''); };
 
@@ -620,9 +628,9 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels }: {
         <>
           <div className="action-actions">
             {auto
-              ? <button className="approve" onClick={() => onDecide(a.id, 'approve')}>✓ Approve &amp; publish{a.cost_cents > 0 ? ` (${usd(a.cost_cents)})` : ''}</button>
+              ? <button className="approve" onClick={approve} disabled={acting}>{acting ? <><span className="spin">⟳</span> Publishing…</> : <>✓ Approve &amp; publish{a.cost_cents > 0 ? ` (${usd(a.cost_cents)})` : ''}</>}</button>
               : <button className="approve" onClick={onOpenChannels} title="This channel isn’t connected">🔌 Connect to enable</button>}
-            <button className="reject" onClick={() => onDecide(a.id, 'reject')}>✕ Reject</button>
+            <button className="reject" onClick={() => onDecide(a.id, 'reject')} disabled={acting}>✕ Reject</button>
           </div>
           {!auto && <div className="note" style={{ fontSize: 11.5, padding: '0 14px 8px' }}>{a.kind === 'account' ? 'Manual account setup — can’t be auto-published.' : `Connect ${chLabel(a.channel)} under ⚙ Channels and this will publish on approve.`}</div>}
           <div className="feedback">
@@ -643,9 +651,9 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels }: {
         <>
           {a.result && <div className="action-result" style={{ color: 'var(--red)' }}>⚠ {linkify(a.result)}</div>}
           <div className="action-actions">
-            {auto && <button className="approve" onClick={() => onDecide(a.id, 'approve')}>↻ Retry</button>}
+            {auto && <button className="approve" onClick={approve} disabled={acting}>{acting ? <><span className="spin">⟳</span> Publishing…</> : '↻ Retry'}</button>}
             {!auto && <button className="approve" onClick={onOpenChannels} title="This channel isn’t connected">🔌 Connect to enable</button>}
-            <button className="reject" onClick={() => onDecide(a.id, 'reject')}>✕ Dismiss</button>
+            <button className="reject" onClick={() => onDecide(a.id, 'reject')} disabled={acting}>✕ Dismiss</button>
           </div>
         </>
       )}

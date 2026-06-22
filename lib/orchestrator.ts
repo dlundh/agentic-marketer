@@ -245,6 +245,12 @@ export async function approveAction(actionId: string): Promise<{ ok: boolean; er
       ? 'This is a manual account-setup task and can’t be auto-published. Connect your existing account under ⚙ Channels, then reject this.'
       : `${channelDef(a.channel).label} isn’t connected, so this can’t auto-publish. Connect it under ⚙ Channels (or reject this action).` };
   }
+  // Guard: don't publish a video script / storyboard as a text post.
+  const SCRIPT_MARKERS = /on-screen text:|voice ?over|\bVO:|b-roll|\*\*format:?\*\*|hook \(0|talking-to-camera|\b9:16\b|\(\d\/\d\)/i;
+  const textChannel = ['x', 'mastodon', 'threads', 'linkedin', 'reddit'].includes(a.channel);
+  if (textChannel && a.content && SCRIPT_MARKERS.test(a.content)) {
+    return { ok: false, error: 'This reads like a video script, not a ready-to-post message. Use the feedback box (e.g. “rewrite as a natural tweet thread, no stage directions”), then approve.' };
+  }
   if (a.cost_cents > 0 && !reserveSpend(a.campaign_id, a.cost_cents)) {
     const c = getCampaign(a.campaign_id);
     const remaining = c ? (c.budget_cents - c.spent_cents) / 100 : 0;
@@ -252,14 +258,12 @@ export async function approveAction(actionId: string): Promise<{ ok: boolean; er
   }
   updateAction(actionId, { status: 'approved' });
   emitEvent({ type: 'finding', projectId: a.project_id });
-  // Execute asynchronously so the API call returns immediately.
-  (async () => {
-    const res = await runAction(getAction(actionId)!);
-    if (res.status === 'failed' && a.cost_cents > 0) refundSpend(a.campaign_id, a.cost_cents);
-    updateAction(actionId, { status: res.status, result: res.detail });
-    emitEvent({ type: 'finding', projectId: a.project_id });
-  })();
-  return { ok: true };
+  // Await execution so the caller gets real success/failure feedback (+ the link).
+  const res = await runAction(getAction(actionId)!);
+  if (res.status === 'failed' && a.cost_cents > 0) refundSpend(a.campaign_id, a.cost_cents);
+  updateAction(actionId, { status: res.status, result: res.detail });
+  emitEvent({ type: 'finding', projectId: a.project_id });
+  return { ok: true, status: res.status, detail: res.detail };
 }
 
 // Take user feedback on a proposed action, revise its content with an agent,
