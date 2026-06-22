@@ -474,6 +474,39 @@ const CH_LABEL: Record<string, string> = {
 const chLabel = (k: string) => CH_LABEL[k] || k;
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
+// Per-channel Zapier/Make recipe: which action + which text field to map.
+const WEBHOOK_RECIPE: Record<string, { action: string; field: string }> = {
+  linkedin: { action: 'Create Share Update', field: 'Comment' },
+  facebook: { action: 'Create Page Post', field: 'Message' },
+  instagram: { action: 'Publish Photo / Reel', field: 'Caption' },
+  youtube: { action: 'your upload/post action', field: 'Description' },
+  blog: { action: 'your CMS “Create Post” action', field: 'Body' },
+  tiktok: { action: 'Create Video', field: 'Caption' },
+};
+
+function WebhookGuide({ channel }: { channel: string }) {
+  const r = WEBHOOK_RECIPE[channel] || { action: 'your “Create Post” action', field: 'the post-text field' };
+  const label = chLabel(channel);
+  return (
+    <div className="guide">
+      <div className="note" style={{ fontSize: 11.5, marginBottom: 6 }}>
+        This routes approved {label} posts through Zapier (or Make.com) to your account. One-time setup:
+      </div>
+      <ol>
+        <li><b>Create a Zap.</b> Trigger → <b>Webhooks by Zapier → Catch Hook</b>. Copy the webhook URL it shows. <span className="note">(Webhooks needs a paid Zapier plan. Free alternative: <a href="https://www.make.com" target="_blank" rel="noreferrer">Make.com</a> → “Custom webhook”.)</span></li>
+        <li>Paste that URL in the box below → <b>Connect &amp; test</b> (we send a test ping).</li>
+        <li>Add action <b>{label} → {r.action}</b>; sign into your {label} account.</li>
+        <li><b>Key step:</b> in the trigger’s <b>Test</b>, click <b>“Find new records”</b> and pick a request that has a <code>content</code> field (a real post) — <i>not</i> the <code>connection_test</code> ping. To create one, just <b>Approve a {label} post here first</b>.</li>
+        <li>Map <b>{r.field}</b> → <code>content</code> (optionally Title → <code>title</code>).</li>
+        <li><b>Publish</b> the Zap so it’s <b>On</b> — a Draft never runs.</li>
+        <li>Done — <b>Approve</b> a {label} action here and it posts through your Zap.</li>
+      </ol>
+      <div className="note" style={{ fontSize: 11 }}>Fields we send: <code>content</code> (post text), <code>title</code>, <code>summary</code>, <code>channel</code>, <code>callback_url</code>.</div>
+      <a className="mini" style={{ display: 'inline-block', marginTop: 8 }} href="https://zapier.com/app/editor" target="_blank" rel="noreferrer">Open Zapier ↗</a>
+    </div>
+  );
+}
+
 // Paste-ready answer for X's "describe all of your use cases" review field.
 const X_USECASE = `This app is a personal marketing assistant used by a single authenticated user to manage their own brand's presence on X.
 
@@ -858,6 +891,7 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
   const [msg, setMsg] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState<string | null>(null);
+  const [guide, setGuide] = useState(false);
   const [instance, setInstance] = useState('mastodon.social');
   const [cid, setCid] = useState('');
   const [csec, setCsec] = useState('');
@@ -940,6 +974,8 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
         </div>
       ) : (
         <div className="chan-form">
+          <button className="mini" style={{ alignSelf: 'flex-start' }} onClick={() => setGuide(!guide)}>{guide ? '✕ Hide setup guide' : '📋 How to set up the Zap (step-by-step)'}</button>
+          {guide && <WebhookGuide channel={c.key} />}
           <div className="note" style={{ fontSize: 11.5 }}>To auto-post here, paste a <b>posting webhook URL</b> from Zapier / Make / Buffer / n8n (pointed at your real account). We send a test ping and only mark it connected if it works.</div>
           <input className="field" placeholder="Posting webhook URL  (required to auto-post)" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} />
           <input className="field" placeholder="@handle / username  (optional, reference)" value={f.handle} onChange={(e) => setF({ ...f, handle: e.target.value })} />
