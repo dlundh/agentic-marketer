@@ -895,6 +895,7 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
   const [instance, setInstance] = useState('mastodon.social');
   const [cid, setCid] = useState('');
   const [csec, setCsec] = useState('');
+  const [webhookMode, setWebhookMode] = useState(false);
   const isOAuth = ['mastodon', 'x', 'reddit', 'linkedin'].includes(c.key);
   const redirectUri = (typeof window !== 'undefined' ? window.location.origin : '') + `/api/oauth/${c.key}/callback`;
   const portal = c.key === 'x' ? 'https://developer.twitter.com/en/portal/dashboard'
@@ -944,7 +945,7 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
         </div>
       </div>
       {createMsg && <div className="chan-msg">{createMsg}</div>}
-      {open && !c.connected && (isOAuth ? (
+      {open && !c.connected && (isOAuth && !webhookMode ? (
         <div className="chan-form">
           {c.key === 'mastodon' ? (
             <>
@@ -972,12 +973,14 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
               <button className="approve" onClick={() => startOAuth({ client_id: cid.trim(), client_secret: csec.trim() })} disabled={busy || !cid.trim() || !csec.trim()}>
                 {busy ? <span className="spin">⟳</span> : `Connect with ${c.label} ↗`}
               </button>
+              <button className="mini" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => { setWebhookMode(true); setMsg(null); }}>Can’t make a dev app? Use a webhook (Make / Zapier / n8n) instead →</button>
             </>
           )}
           {msg && <div className="note" style={{ fontSize: 11.5 }}>{msg}</div>}
         </div>
       ) : (
         <div className="chan-form">
+          {isOAuth && <button className="mini" style={{ alignSelf: 'flex-start' }} onClick={() => { setWebhookMode(false); setMsg(null); }}>← Back to direct connect (OAuth)</button>}
           <button className="mini" style={{ alignSelf: 'flex-start' }} onClick={() => setGuide(!guide)}>{guide ? '✕ Hide setup guide' : '📋 How to set up the Zap (step-by-step)'}</button>
           {guide && <WebhookGuide channel={c.key} />}
           <div className="note" style={{ fontSize: 11.5 }}>To auto-post here, paste a <b>posting webhook URL</b> from Zapier / Make / Buffer / n8n (pointed at your real account). We send a test ping and only mark it connected if it works.</div>
