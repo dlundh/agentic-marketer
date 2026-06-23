@@ -895,9 +895,11 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
   const [instance, setInstance] = useState('mastodon.social');
   const [cid, setCid] = useState('');
   const [csec, setCsec] = useState('');
-  const isOAuth = ['mastodon', 'x', 'reddit'].includes(c.key);
+  const isOAuth = ['mastodon', 'x', 'reddit', 'linkedin'].includes(c.key);
   const redirectUri = (typeof window !== 'undefined' ? window.location.origin : '') + `/api/oauth/${c.key}/callback`;
-  const portal = c.key === 'x' ? 'https://developer.twitter.com/en/portal/dashboard' : 'https://www.reddit.com/prefs/apps';
+  const portal = c.key === 'x' ? 'https://developer.twitter.com/en/portal/dashboard'
+    : c.key === 'linkedin' ? 'https://www.linkedin.com/developers/apps'
+    : 'https://www.reddit.com/prefs/apps';
 
   const startOAuth = async (payload: any) => {
     setBusy(true); setMsg(null);
@@ -961,7 +963,9 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
               </div>
               {c.key === 'x' && <UseCaseBlock />}
               <a className="note" style={{ fontSize: 11.5 }} href={portal} target="_blank" rel="noreferrer">
-                {c.key === 'x' ? 'Open X developer portal ↗ — create an app, enable OAuth 2.0 (Web App / confidential), scopes incl. tweet.write' : 'Open Reddit apps ↗ — create a "web app", set the redirect URI above'}
+                {c.key === 'x' ? 'Open X developer portal ↗ — create an app, enable OAuth 2.0 (Web App / confidential), scopes incl. tweet.write'
+                  : c.key === 'linkedin' ? 'Open LinkedIn developer portal ↗ — create an app, add the “Sign In with LinkedIn using OpenID Connect” + “Share on LinkedIn” products, set the redirect URL above, then copy the Client ID/Secret from the Auth tab'
+                  : 'Open Reddit apps ↗ — create a "web app", set the redirect URI above'}
               </a>
               <input className="field" placeholder="Client ID" value={cid} onChange={(e) => setCid(e.target.value)} />
               <input className="field" type="password" placeholder="Client Secret" value={csec} onChange={(e) => setCsec(e.target.value)} />

@@ -134,6 +134,46 @@ export async function postReddit(token: string, subreddit: string, title: string
   return { url: j?.json?.data?.url || '' };
 }
 
+// ---- LinkedIn (OAuth2, posts via UGC API) ---------------------------------
+const LINKEDIN_SCOPES = 'openid profile w_member_social';
+
+export function linkedinAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {
+  const q = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: redirectUri, state, scope: LINKEDIN_SCOPES });
+  return `https://www.linkedin.com/oauth/v2/authorization?${q.toString()}`;
+}
+export async function exchangeLinkedinCode(clientId: string, clientSecret: string, code: string, redirectUri: string): Promise<string> {
+  const res = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: clientId, client_secret: clientSecret }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`LinkedIn token exchange failed (HTTP ${res.status})`);
+  return (await res.json() as any).access_token;
+}
+// OpenID userinfo → the member's person id (for the author URN).
+export async function verifyLinkedinAccount(token: string): Promise<{ sub: string; name: string }> {
+  const res = await fetch('https://api.linkedin.com/v2/userinfo', { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`LinkedIn verify failed (HTTP ${res.status}) — make sure the "Sign In with LinkedIn using OpenID Connect" product is added.`);
+  const j: any = await res.json();
+  return { sub: j.sub, name: j.name || j.given_name || 'your account' };
+}
+export async function postLinkedin(token: string, authorUrn: string, text: string): Promise<{ url: string }> {
+  const res = await fetch('https://api.linkedin.com/v2/ugcPosts', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Restli-Protocol-Version': '2.0.0' },
+    body: JSON.stringify({
+      author: authorUrn,
+      lifecycleState: 'PUBLISHED',
+      specificContent: { 'com.linkedin.ugc.ShareContent': { shareCommentary: { text: text.slice(0, 2950) }, shareMediaCategory: 'NONE' } },
+      visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },
+    }),
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error(`LinkedIn post failed (HTTP ${res.status}): ${(await res.text()).slice(0, 160)}`);
+  const id = res.headers.get('x-restli-id') || '';
+  return { url: id ? `https://www.linkedin.com/feed/update/${id}` : '' };
+}
+
 // ---- Mastodon (self-registering) ------------------------------------------
 const SCOPES = 'read write';
 

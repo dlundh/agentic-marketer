@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import { getConnector, upsertConnector, type ActionRow, type Connector } from './db';
-import { postMastodon, postX, refreshX, postReddit, refreshReddit } from './oauth';
+import { postMastodon, postX, refreshX, postReddit, refreshReddit, postLinkedin } from './oauth';
 
 // ---------------------------------------------------------------------------
 // Channel catalog + execution adapters.
@@ -119,7 +119,7 @@ export function autoChannels(): string[] {
     if (ch.key === 'webhook' || ch.key === 'smtp') continue;
     const own = getConnector(ch.key);
     const s = own?.connected ? safeJSON(own.secrets) : null;
-    const native = ['mastodon', 'x', 'reddit'].includes(ch.key) && s?.access_token;
+    const native = ['mastodon', 'x', 'reddit', 'linkedin'].includes(ch.key) && s?.access_token;
     const ownHook = !!s?.url;
     const viaWebhook = webhookOn && ch.executor === 'webhook';
     const viaSmtp = smtpOn && ch.executor === 'smtp';
@@ -135,7 +135,7 @@ export function isAutoExecutable(action: ActionRow): boolean {
   const def = channelDef(action.channel);
   const own = getConnector(action.channel);
   const ownSecrets = own?.connected ? safeJSON(own.secrets) : null;
-  if (['mastodon', 'x', 'reddit'].includes(action.channel) && ownSecrets?.access_token) return true; // native API
+  if (['mastodon', 'x', 'reddit', 'linkedin'].includes(action.channel) && ownSecrets?.access_token) return true; // native API
   if (ownSecrets?.url) return true; // per-channel webhook
   const emailish = def.executor === 'smtp' || ['email', 'outreach'].includes(action.kind);
   if (emailish && getConnector('smtp')?.connected) return true; // SMTP
@@ -227,6 +227,10 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
       if (!sub) return { status: 'ready', detail: 'Approved — add a target subreddit (e.g. r/IndieMusic) to this action, then it can auto-post.' };
       const r = await withRefresh('reddit', ownSecrets, def.label, (tok) => postReddit(tok, sub, action.title, action.content || ''));
       return { status: 'done', detail: `Posted to r/${sub}: ${r.url}` };
+    }
+    if (action.channel === 'linkedin' && ownSecrets?.access_token && ownSecrets?.author) {
+      const r = await postLinkedin(ownSecrets.access_token, ownSecrets.author, text);
+      return { status: 'done', detail: `Posted to LinkedIn${ownSecrets.handle ? ` as ${ownSecrets.handle}` : ''}${r.url ? `: ${r.url}` : ''}` };
     }
     if (emailish && smtp?.connected) return await sendEmail(smtp, action) as any;
     // A channel connected with its own posting webhook takes precedence.

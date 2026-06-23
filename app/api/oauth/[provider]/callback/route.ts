@@ -4,6 +4,7 @@ import {
   exchangeCode, verifyAccount,
   exchangeXCode, verifyXAccount,
   exchangeRedditCode, verifyRedditAccount,
+  exchangeLinkedinCode, verifyLinkedinAccount,
 } from '@/lib/oauth';
 
 export const runtime = 'nodejs';
@@ -41,6 +42,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ provider
       const { access_token, refresh_token } = await exchangeRedditCode(s.client_id, s.client_secret, code, s.redirect_uri);
       const acct = await verifyRedditAccount(access_token);
       upsertConnector({ key: 'reddit', label, executor: 'reddit', connected: true, secrets: { client_id: s.client_id, client_secret: s.client_secret, access_token, refresh_token, handle: acct.handle, profile: acct.url } });
+      return back('connected');
+    }
+    if (provider === 'linkedin') {
+      const token = await exchangeLinkedinCode(s.client_id, s.client_secret, code, s.redirect_uri);
+      const acct = await verifyLinkedinAccount(token);
+      upsertConnector({ key: 'linkedin', label, executor: 'linkedin', connected: true, secrets: { client_id: s.client_id, client_secret: s.client_secret, access_token: token, author: `urn:li:person:${acct.sub}`, handle: acct.name } });
       return back('connected');
     }
     return back('error');
