@@ -817,8 +817,10 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
         </div>
         <div className="modal-body">
           <div className="kgroup">
-            <h4>Automation webhook {webhookOn && <span className="zero-pill">connected</span>}</h4>
-            <p className="note">The universal bridge: approved posts/ads are POSTed here so Zapier / Make / n8n / Buffer publish them to any platform.</p>
+            <h4>Automation webhook — catch-all fallback {webhookOn && <span className="zero-pill">connected</span>}</h4>
+            <p className="note">
+              One URL for channels you haven’t connected natively. Approved posts for those channels are POSTed here (each payload includes a <code>channel</code> field), and your Make / Zapier / n8n scenario routes them to the right place. Natively-connected channels (X, Mastodon, LinkedIn, Reddit) post directly and ignore this. Best for posts — not ads. A 200 means delivered to your automation, not confirmed live.
+            </p>
             {webhookOn ? (
               <button className="reject" onClick={() => disconnect('webhook')}>Disconnect</button>
             ) : (

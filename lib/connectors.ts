@@ -24,7 +24,7 @@ export type ChannelDef = {
 };
 
 export const CHANNELS: ChannelDef[] = [
-  { key: 'webhook', label: 'Automation webhook (Zapier / Make / n8n / Buffer)', category: 'automation', executor: 'webhook', note: 'Universal bridge — approved actions are POSTed here so your automation publishes them anywhere.' },
+  { key: 'webhook', label: 'Automation webhook (Zapier / Make / n8n / Buffer)', category: 'automation', executor: 'webhook', note: 'Catch-all fallback: approved actions for channels without a native connection are POSTed here (with a channel field) for your automation to route. 200 = delivered, not confirmed live.' },
   { key: 'smtp', label: 'Email (SMTP)', category: 'email', executor: 'smtp', note: 'Sends approved outreach/lifecycle emails. Opt-out footer enforced.' },
 
   { key: 'x', label: 'X / Twitter', category: 'organic', executor: 'webhook' },
