@@ -474,35 +474,38 @@ const CH_LABEL: Record<string, string> = {
 const chLabel = (k: string) => CH_LABEL[k] || k;
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
-// Per-channel Zapier/Make recipe: which action + which text field to map.
+// Per-channel Make.com recipe: which module + which text field to map.
 const WEBHOOK_RECIPE: Record<string, { action: string; field: string }> = {
-  linkedin: { action: 'Create Share Update', field: 'Comment' },
-  facebook: { action: 'Create Page Post', field: 'Message' },
-  instagram: { action: 'Publish Photo / Reel', field: 'Caption' },
-  youtube: { action: 'your upload/post action', field: 'Description' },
-  blog: { action: 'your CMS “Create Post” action', field: 'Body' },
-  tiktok: { action: 'Create Video', field: 'Caption' },
+  linkedin: { action: 'Create a Post', field: 'Text' },
+  facebook: { action: 'Create a Post', field: 'Message' },
+  instagram: { action: 'Create a Post', field: 'Caption' },
+  youtube: { action: 'your upload/post module', field: 'Description' },
+  blog: { action: 'your CMS “Create a Post” module', field: 'Body' },
+  tiktok: { action: 'Upload a Video', field: 'Caption' },
 };
 
 function WebhookGuide({ channel }: { channel: string }) {
-  const r = WEBHOOK_RECIPE[channel] || { action: 'your “Create Post” action', field: 'the post-text field' };
+  const r = WEBHOOK_RECIPE[channel] || { action: 'your “Create a Post” module', field: 'the post-text field' };
   const label = chLabel(channel);
   return (
     <div className="guide">
       <div className="note" style={{ fontSize: 11.5, marginBottom: 6 }}>
-        This routes approved {label} posts through Zapier (or Make.com) to your account. One-time setup:
+        Routes approved {label} posts through <b>Make.com</b> (free — its webhooks run on the free tier, unlike Zapier). One-time setup:
       </div>
       <ol>
-        <li><b>Create a Zap.</b> Trigger → <b>Webhooks by Zapier → Catch Hook</b>. Copy the webhook URL it shows. <span className="note">(Webhooks needs a paid Zapier plan. Free alternative: <a href="https://www.make.com" target="_blank" rel="noreferrer">Make.com</a> → “Custom webhook”.)</span></li>
-        <li>Paste that URL in the box below → <b>Connect &amp; test</b> (we send a test ping).</li>
-        <li>Add action <b>{label} → {r.action}</b>; sign into your {label} account.</li>
-        <li><b>Key step:</b> in the trigger’s <b>Test</b>, click <b>“Find new records”</b> and pick a request that has a <code>content</code> field (a real post) — <i>not</i> the <code>connection_test</code> ping. To create one, just <b>Approve a {label} post here first</b>.</li>
-        <li>Map <b>{r.field}</b> → <code>content</code> (optionally Title → <code>title</code>).</li>
-        <li><b>Publish</b> the Zap so it’s <b>On</b> — a Draft never runs.</li>
-        <li>Done — <b>Approve</b> a {label} action here and it posts through your Zap.</li>
+        <li>In <b>Make.com</b> → <b>Create a new scenario</b>. Add a module → search <b>Webhooks → Custom webhook</b> → <b>Add</b>, name it, and <b>Copy</b> the address it generates.</li>
+        <li>Paste that address in the box below → <b>Connect &amp; test</b> (we send a ping so Make sees the hook).</li>
+        <li>Add the next module → <b>{label} → {r.action}</b> → connect your {label} account.</li>
+        <li>Map the <b>{r.field}</b> field to the webhook’s <code>content</code> (optionally a Title → <code>title</code>).</li>
+        <li><b>Key step:</b> to make <code>content</code> appear, <b>Approve a {label} post here first</b>, then in Make click the Webhook module → <b>“Redetermine data structure”</b> so it captures the real payload (the <code>connection_test</code> ping has no <code>content</code>).</li>
+        <li>Turn the scenario <b>ON</b> (toggle, bottom-left) — a saved-but-off scenario won’t run.</li>
+        <li>Done — <b>Approve</b> a {label} action here and it posts through Make.</li>
       </ol>
       <div className="note" style={{ fontSize: 11 }}>Fields we send: <code>content</code> (post text), <code>title</code>, <code>summary</code>, <code>channel</code>, <code>callback_url</code>.</div>
-      <a className="mini" style={{ display: 'inline-block', marginTop: 8 }} href="https://zapier.com/app/editor" target="_blank" rel="noreferrer">Open Zapier ↗</a>
+      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <a className="mini" href="https://www.make.com" target="_blank" rel="noreferrer">Open Make.com ↗</a>
+      </div>
+      <div className="note" style={{ fontSize: 11, marginTop: 6 }}>Prefer Zapier? Same flow with <b>Webhooks by Zapier → Catch Hook</b> (needs a paid Zapier plan).</div>
     </div>
   );
 }
@@ -981,7 +984,7 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
       ) : (
         <div className="chan-form">
           {isOAuth && <button className="mini" style={{ alignSelf: 'flex-start' }} onClick={() => { setWebhookMode(false); setMsg(null); }}>← Back to direct connect (OAuth)</button>}
-          <button className="mini" style={{ alignSelf: 'flex-start' }} onClick={() => setGuide(!guide)}>{guide ? '✕ Hide setup guide' : '📋 How to set up the Zap (step-by-step)'}</button>
+          <button className="mini" style={{ alignSelf: 'flex-start' }} onClick={() => setGuide(!guide)}>{guide ? '✕ Hide setup guide' : '📋 How to set up the automation (Make.com — free)'}</button>
           {guide && <WebhookGuide channel={c.key} />}
           <div className="note" style={{ fontSize: 11.5 }}>To auto-post here, paste a <b>posting webhook URL</b> from Zapier / Make / Buffer / n8n (pointed at your real account). We send a test ping and only mark it connected if it works.</div>
           <input className="field" placeholder="Posting webhook URL  (required to auto-post)" value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} />
