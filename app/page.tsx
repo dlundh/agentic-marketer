@@ -38,6 +38,7 @@ export default function Page() {
   const [modalJobId, setModalJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showChannels, setShowChannels] = useState(false);
+  const [showJobs, setShowJobs] = useState(true);
   const [showLaunch, setShowLaunch] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -200,21 +201,24 @@ export default function Page() {
         {/* ACTIVE PROJECT */}
         {detail && (
           <div className="section">
-            <h2>
-              Active · {detail.project.title}
+            <h2 className="section-toggle" onClick={() => setShowJobs((v) => !v)} style={{ cursor: 'pointer' }}>
+              <span className="caret">{showJobs ? '▾' : '▸'}</span> Active · {detail.project.title}
               {' '}<PhaseChip phase={detail.project.phase} />
+              {!showJobs && <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· {detail.jobs.length} agent{detail.jobs.length === 1 ? '' : 's'} hidden</span>}
             </h2>
-            <div className="jobs">
-              {detail.jobs.map((j) => (
-                <JobCard
-                  key={j.id}
-                  job={j}
-                  onOpen={() => setModalJobId(j.id)}
-                  onControl={control}
-                />
-              ))}
-              {detail.jobs.length === 0 && <div className="empty">No jobs yet.</div>}
-            </div>
+            {showJobs && (
+              <div className="jobs">
+                {detail.jobs.map((j) => (
+                  <JobCard
+                    key={j.id}
+                    job={j}
+                    onOpen={() => setModalJobId(j.id)}
+                    onControl={control}
+                  />
+                ))}
+                {detail.jobs.length === 0 && <div className="empty">No jobs yet.</div>}
+              </div>
+            )}
 
             {/* Execution phase: campaign + action queue, or a CTA to launch it */}
             {detail.campaign ? (
