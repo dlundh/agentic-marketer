@@ -538,6 +538,7 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
   onRevise: (id: string, feedback: string) => void; onOptimize: () => void; onGenerate: () => void; onOpenChannels: () => void; anyExecLive: boolean;
 }) {
   const [autoOnly, setAutoOnly] = useState(true);
+  const [showLive, setShowLive] = useState(false);
   const allProposed = actions.filter((a) => ['proposed', 'revising'].includes(a.status));
   const proposed = autoOnly ? allProposed.filter((a) => a.auto) : allProposed;
   const hiddenManual = allProposed.length - proposed.length;
@@ -590,8 +591,12 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
         {failed.length > 0 && <div className="queue-col-head" style={{ marginTop: 18, color: 'var(--red)' }}>⚠ Failed — needs attention · {failed.length}</div>}
         {failed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} />)}
 
-        {live.length > 0 && <div className="queue-col-head" style={{ marginTop: 18 }}>Approved & executed · {live.length}</div>}
-        {live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} />)}
+        {live.length > 0 && (
+          <button className="queue-col-head section-toggle" style={{ marginTop: 18 }} onClick={() => setShowLive((v) => !v)}>
+            <span className="caret">{showLive ? '▾' : '▸'}</span> Approved &amp; executed · {live.length}
+          </button>
+        )}
+        {showLive && live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} />)}
 
         {rejected.length > 0 && <div className="note" style={{ fontSize: 12, marginTop: 14 }}>{rejected.length} rejected.</div>}
       </div>
