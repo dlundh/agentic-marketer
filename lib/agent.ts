@@ -307,7 +307,11 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
     ].join('\n'),
     email: [
       `YOUR ROLE — Email & Direct Outreach:`,
-      `Define the target personas/segments, then propose a 2–3 step warm/cold outreach sequence and the key lifecycle emails. Use propose_action with kind "email"/"outreach", put the subject line in \`subject\` and ready-to-send copy in \`content\`. Describe WHO to target in \`targeting\`; do NOT invent real people's email addresses — leave recipients empty for the user to supply. Keep it opt-in friendly.`,
+      `Define the target personas/segments, then propose a 2–3 step warm/cold outreach sequence and the key lifecycle emails. Use propose_action with kind "email"/"outreach", put the subject line in \`subject\` and ready-to-send copy in \`content\`. Describe WHO to target in \`targeting\`.`,
+      `PERSONALIZATION (required): write each email as a template using these merge tokens, which the app fills per recipient from the user's list — do NOT hardcode names or invent addresses:`,
+      `  • Greeting: open with "Hi {{first_name}}," (use {{name}} only if a full name reads better).`,
+      `  • Use {{company}} where referencing the recipient's company/label is natural; {{email}} is also available.`,
+      `Keep tokens to those four. Leave recipients empty — the user picks a list at approval. Keep it opt-in friendly.`,
     ].join('\n'),
     ads: [
       `YOUR ROLE — Paid Advertising (strictly budget-bound):`,
@@ -315,7 +319,8 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
     ].join('\n'),
     influencer: [
       `YOUR ROLE — Influencer & Creator Outreach:`,
-      `Use web search to identify 5–10 relevant micro/nano-creator archetypes and example creators/communities for this product. For each, propose_action with kind "outreach", channel "influencer", a personalized pitch in \`content\`, and a fair UGC/affiliate offer that fits the budget. No payment promises beyond budget.`,
+      `Use web search to identify 5–10 relevant micro/nano-creator archetypes and example creators/communities for this product. For each, propose_action with kind "outreach", channel "influencer", a pitch in \`content\`, and a fair UGC/affiliate offer that fits the budget. No payment promises beyond budget.`,
+      `These send through the email pipeline to a recipient list, so TEMPLATE the pitch with merge tokens (filled per recipient): open with "Hi {{first_name}}," and use {{company}} where natural. Do NOT hardcode a specific creator's name. Leave recipients empty — the user picks a list at approval.`,
     ].join('\n'),
     optimizer: [
       `YOUR ROLE — Optimizer:`,
@@ -498,6 +503,7 @@ export async function runRevision(opts: { action: ActionRow; feedback: string; a
     `USER FEEDBACK / ADJUSTMENT:\n${feedback}`,
     ``,
     `Keep it channel-native and ready-to-post (no stage directions). For X/Mastodon/Threads/Instagram/TikTok posts, ensure 2–4 relevant hashtags for reach (on the final tweet of a thread); no hashtags for Reddit/Hacker News.`,
+    `If this is an email/outreach action, keep it templated with merge tokens — "Hi {{first_name}}," and {{company}} where natural — never hardcode a name; the app fills them per recipient.`,
     `Apply the feedback: preserve what works, change what they ask for. If the feedback needs fresh facts, you may use web search. Then call submit_revision exactly once with the complete revised action.`,
   ].filter(Boolean).join('\n');
 
