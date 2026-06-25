@@ -14,7 +14,8 @@ type FileRow = { id: string; name: string; mime: string; size: number; kind: str
 type Project = { id: string; title: string; prompt: string; url: string | null; phase: string; status: string; summary: string | null; updated_at: number; jobs?: Job[] };
 type Campaign = { id: string; status: string; currency: string; budget_cents: number; spent_cents: number; channels: string | null; autonomy: string; strategy: string | null };
 type ActionItem = { id: string; channel: string; kind: string; title: string; summary: string | null; content: string | null; meta: string | null; cost_cents: number; status: string; result: string | null; job_id: string | null; auto?: boolean };
-type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[] };
+type EmailList = { id: string; name: string; total?: number; active?: number };
+type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[]; lists?: EmailList[] };
 type Auth = { connected: boolean; method: string; detail: string };
 type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean; excluded?: boolean };
 
@@ -39,6 +40,7 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [showChannels, setShowChannels] = useState(false);
   const [showJobs, setShowJobs] = useState(true);
+  const [showLists, setShowLists] = useState(false);
   const [showLaunch, setShowLaunch] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -125,10 +127,10 @@ export default function Page() {
     loadDetail(currentId);
   };
 
-  const decide = async (actionId: string, action: 'approve' | 'reject') => {
+  const decide = async (actionId: string, action: 'approve' | 'reject', list_id?: string) => {
     setError(null); setNotice(null);
     const res = await fetch(`/api/actions/${actionId}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, list_id }),
     });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) setError(d.error || 'Action failed.');
@@ -230,6 +232,8 @@ export default function Page() {
                 onOptimize={optimize}
                 onGenerate={generate}
                 onOpenChannels={() => setShowChannels(true)}
+                onOpenLists={() => setShowLists(true)}
+                lists={detail.lists || []}
                 anyExecLive={detail.jobs.some((j) => j.phase === 'execution' && j.live)}
               />
             ) : ['marketing', 'done'].includes(detail.project.phase) && !detail.jobs.some((j) => j.live) ? (
@@ -277,6 +281,7 @@ export default function Page() {
       {showConnect && <ConnectModal auth={auth} onClose={() => setShowConnect(false)} reload={loadAuth} />}
       {showChannels && <ChannelsModal onClose={() => setShowChannels(false)} hasCampaign={!!detail?.campaign} hasProject={!!currentId} onCreate={createAccount} />}
       {showLaunch && detail && <LaunchModal onClose={() => setShowLaunch(false)} onLaunch={launchCampaign} />}
+      {showLists && currentId && <EmailListsModal projectId={currentId} onClose={() => setShowLists(false)} onChanged={() => currentId && loadDetail(currentId)} />}
     </>
   );
 }
@@ -537,9 +542,10 @@ function linkify(text: string) {
   );
 }
 
-function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGenerate, onOpenChannels, anyExecLive }: {
-  campaign: Campaign; actions: ActionItem[]; onDecide: (id: string, a: 'approve' | 'reject') => void;
-  onRevise: (id: string, feedback: string) => void; onOptimize: () => void; onGenerate: () => void; onOpenChannels: () => void; anyExecLive: boolean;
+function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGenerate, onOpenChannels, onOpenLists, lists, anyExecLive }: {
+  campaign: Campaign; actions: ActionItem[]; onDecide: (id: string, a: 'approve' | 'reject', list_id?: string) => void;
+  onRevise: (id: string, feedback: string) => void; onOptimize: () => void; onGenerate: () => void;
+  onOpenChannels: () => void; onOpenLists: () => void; lists: EmailList[]; anyExecLive: boolean;
 }) {
   const [autoOnly, setAutoOnly] = useState(true);
   const [showLive, setShowLive] = useState(false);
@@ -562,9 +568,10 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
               <span className="of"> of {usd(campaign.budget_cents)}</span>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="iconbtn" onClick={onGenerate} disabled={anyExecLive} title="Generate fresh actions for your connected channels">✨ Generate actions</button>
             <button className="iconbtn" onClick={onOptimize} disabled={anyExecLive} title="Review & improve existing actions">⚡ Optimize</button>
+            <button className="iconbtn" onClick={onOpenLists} title="Manage email recipient lists">✉️ Email lists</button>
           </div>
         </div>
         {campaign.budget_cents > 0 && <div className="meter"><div className="meter-fill" style={{ width: `${pct}%` }} /></div>}
@@ -582,7 +589,7 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
           </label>
         </div>
         {proposed.length === 0 && <div className="empty" style={{ padding: 18 }}>{anyExecLive ? 'Agents are still working…' : autoOnly && hiddenManual > 0 ? 'No auto-publishable actions yet — connect more channels under ⚙ Channels.' : 'No actions waiting.'}</div>}
-        {proposed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} />)}
+        {proposed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} />)}
         {hiddenManual > 0 && (
           <div className="note" style={{ fontSize: 12, marginTop: 8 }}>
             {autoOnly ? `${hiddenManual} manual / unconnected action${hiddenManual === 1 ? '' : 's'} hidden. ` : ''}
@@ -593,14 +600,14 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
         )}
 
         {failed.length > 0 && <div className="queue-col-head" style={{ marginTop: 18, color: 'var(--red)' }}>⚠ Failed — needs attention · {failed.length}</div>}
-        {failed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} />)}
+        {failed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} />)}
 
         {live.length > 0 && (
           <button className="queue-col-head section-toggle" style={{ marginTop: 18 }} onClick={() => setShowLive((v) => !v)}>
             <span className="caret">{showLive ? '▾' : '▸'}</span> Approved &amp; executed · {live.length}
           </button>
         )}
-        {showLive && live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} />)}
+        {showLive && live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} />)}
 
         {rejected.length > 0 && <div className="note" style={{ fontSize: 12, marginTop: 14 }}>{rejected.length} rejected.</div>}
       </div>
@@ -608,9 +615,9 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
   );
 }
 
-function ActionCard({ a, onDecide, onRevise, onOpenChannels }: {
-  a: ActionItem; onDecide: (id: string, x: 'approve' | 'reject') => void; onRevise: (id: string, feedback: string) => void;
-  onOpenChannels: () => void;
+function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenLists }: {
+  a: ActionItem; onDecide: (id: string, x: 'approve' | 'reject', list_id?: string) => void; onRevise: (id: string, feedback: string) => void;
+  onOpenChannels: () => void; lists?: EmailList[]; onOpenLists?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -620,7 +627,9 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels }: {
   const revisions: { feedback: string; ts: number }[] = meta.revisions || [];
   const revising = a.status === 'revising';
   const auto = !!a.auto;
-  const approve = async () => { setActing(true); await onDecide(a.id, 'approve'); setActing(false); };
+  const isEmail = ['email', 'outreach'].includes(a.kind);
+  const [listId, setListId] = useState<string>(meta.list_id || '');
+  const approve = async () => { setActing(true); await onDecide(a.id, 'approve', isEmail ? listId : undefined); setActing(false); };
   const copy = () => { navigator.clipboard?.writeText(a.content || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); };
   const send = () => { if (!feedback.trim()) return; onRevise(a.id, feedback.trim()); setFeedback(''); };
 
@@ -673,9 +682,19 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels }: {
       {a.status === 'proposed' && (
         <>
           {a.result && <div className="action-result" style={{ color: 'var(--amber)' }}>⚠ {linkify(a.result)}</div>}
+          {auto && isEmail && (
+            <div className="list-row">
+              <span className="note" style={{ fontSize: 12 }}>Send to:</span>
+              <select className="list-select" value={listId} onChange={(e) => setListId(e.target.value)}>
+                <option value="">— choose an email list —</option>
+                {lists.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.active ?? 0})</option>)}
+              </select>
+              <button className="mini" onClick={onOpenLists}>✉️ Manage lists</button>
+            </div>
+          )}
           <div className="action-actions">
             {auto
-              ? <button className="approve" onClick={approve} disabled={acting}>{acting ? <><span className="spin">⟳</span> Publishing…</> : <>✓ Approve &amp; publish{a.cost_cents > 0 ? ` (${usd(a.cost_cents)})` : ''}</>}</button>
+              ? <button className="approve" onClick={approve} disabled={acting || (isEmail && !listId)} title={isEmail && !listId ? 'Choose a list first' : ''}>{acting ? <><span className="spin">⟳</span> {isEmail ? 'Sending…' : 'Publishing…'}</> : <>✓ Approve &amp; {isEmail ? 'send' : 'publish'}{a.cost_cents > 0 ? ` (${usd(a.cost_cents)})` : ''}</>}</button>
               : <button className="approve" onClick={onOpenChannels} title="This channel isn’t connected">🔌 Connect to enable</button>}
             <button className="reject" onClick={() => onDecide(a.id, 'reject')} disabled={acting}>✕ Reject</button>
           </div>
@@ -784,6 +803,79 @@ function UseCaseBlock() {
         <pre style={{ maxHeight: 150, overflow: 'auto' }}>{X_USECASE}</pre>
       </div>
       <div className="note" style={{ fontSize: 11 }}>For the Yes/No questions (analyze X content, display Tweets off X, share data with government) answer <b>No</b>.</div>
+    </div>
+  );
+}
+
+// ----------------------------- Email lists modal ----------------------------
+function EmailListsModal({ projectId, onClose, onChanged }: { projectId: string; onClose: () => void; onChanged: () => void }) {
+  const [data, setData] = useState<{ lists: EmailList[]; suppressions: { email: string }[] }>({ lists: [], suppressions: [] });
+  const [target, setTarget] = useState('new');
+  const [name, setName] = useState('');
+  const [text, setText] = useState('');
+  const [supp, setSupp] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = () => fetch(`/api/projects/${projectId}/lists`).then((r) => r.json()).then(setData).catch(() => {});
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const post = async (body: any) => {
+    setBusy(true);
+    const r = await fetch(`/api/projects/${projectId}/lists`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch(() => ({}));
+    setBusy(false); await load(); onChanged();
+    return r;
+  };
+  const submitRecipients = async () => {
+    if (!text.trim()) return;
+    const r = target === 'new' ? await post({ action: 'create', name: name || 'List', text }) : await post({ action: 'add', list_id: target, text });
+    setMsg(`Added ${r.added ?? 0} recipient(s)${r.parsed != null ? ` of ${r.parsed} parsed` : ''}.`);
+    setText(''); if (target === 'new') setName('');
+  };
+  const suppress = async () => { if (!supp.trim()) return; const r = await post({ action: 'suppress', text: supp }); setMsg(`Suppressed ${r.suppressed ?? 0} address(es).`); setSupp(''); };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 620 }}>
+        <div className="modal-head">
+          <div><h3>Email lists</h3><div className="note">Recipient lists for email outreach. Paste addresses or a CSV — the agent personalizes and the app sends, skipping anyone who unsubscribed.</div></div>
+          <button className="x" onClick={onClose}>×</button>
+        </div>
+        <div className="modal-body">
+          <div className="kgroup">
+            <h4>Add recipients</h4>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+              <select className="list-select" value={target} onChange={(e) => setTarget(e.target.value)}>
+                <option value="new">➕ New list…</option>
+                {data.lists.map((l) => <option key={l.id} value={l.id}>Add to: {l.name}</option>)}
+              </select>
+              {target === 'new' && <input className="field" style={{ marginTop: 0, flex: 1, minWidth: 160 }} placeholder="List name (e.g. Industry scouts)" value={name} onChange={(e) => setName(e.target.value)} />}
+            </div>
+            <textarea className="field" style={{ minHeight: 100 }} placeholder={'Paste emails — one per line, or CSV with headers:\nemail,name,company\njane@label.com,Jane Doe,Big Records\nrep@studio.com'} value={text} onChange={(e) => setText(e.target.value)} />
+            <button className="submit" style={{ marginTop: 8 }} disabled={busy || !text.trim()} onClick={submitRecipients}>{busy ? 'Saving…' : (target === 'new' ? 'Create list & add' : 'Add to list')}</button>
+            {msg && <div className="note" style={{ marginTop: 6 }}>{msg}</div>}
+            <div className="note" style={{ fontSize: 11, marginTop: 6 }}>Personalize copy with <code>{'{{name}}'}</code>, <code>{'{{first_name}}'}</code>, <code>{'{{company}}'}</code>.</div>
+          </div>
+
+          <div className="kgroup">
+            <h4>Lists · {data.lists.length}</h4>
+            {data.lists.length === 0 && <div className="note">No lists yet.</div>}
+            {data.lists.map((l) => (
+              <div className="filerow" key={l.id}>
+                <div className="fn"><div className="n">{l.name}</div><div className="m">{l.active ?? 0} active · {l.total ?? 0} total</div></div>
+                <button className="reject" onClick={() => post({ action: 'delete', list_id: l.id })}>Delete</button>
+              </div>
+            ))}
+          </div>
+
+          <div className="kgroup">
+            <h4>Suppressed (never email) · {data.suppressions.length}</h4>
+            <p className="note">These addresses are skipped on every send. Unsubscribes land here automatically; you can also add some manually.</p>
+            <textarea className="field" style={{ minHeight: 60 }} placeholder="Paste emails to suppress…" value={supp} onChange={(e) => setSupp(e.target.value)} />
+            <button className="reject" style={{ marginTop: 8 }} disabled={busy || !supp.trim()} onClick={suppress}>Add to suppression list</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

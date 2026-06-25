@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { getConnector, upsertConnector, type ActionRow, type Connector } from './db';
+import { getConnector, upsertConnector, activeRecipients, type ActionRow, type Connector, type Recipient } from './db';
 import { postMastodon, postX, refreshX, postReddit, refreshReddit, postLinkedin } from './oauth';
 
 // ---------------------------------------------------------------------------
@@ -64,27 +64,56 @@ export function seedConnectors() {
   }
 }
 
-const OPT_OUT = '\n\n—\nYou received this because we think this is genuinely relevant to you. Reply "unsubscribe" and we will never contact you again.';
+// Replace {{name}} / {{first_name}} / {{company}} / {{email}} tokens per recipient.
+function personalize(text: string, r: { email: string; name?: string | null; company?: string | null }): string {
+  const first = (r.name || '').trim().split(/\s+/)[0] || '';
+  return (text || '')
+    .replace(/\{\{\s*first_name\s*\}\}/gi, first)
+    .replace(/\{\{\s*name\s*\}\}/gi, (r.name || '').trim())
+    .replace(/\{\{\s*company\s*\}\}/gi, (r.company || '').trim())
+    .replace(/\{\{\s*email\s*\}\}/gi, r.email);
+}
+function unsubFooter(projectId: string, email: string): string {
+  const link = `${APP_BASE}/api/unsubscribe?p=${projectId}&e=${encodeURIComponent(email)}`;
+  return `\n\n—\nYou received this because we think it's genuinely relevant to you. Unsubscribe: ${link}  (or simply reply "unsubscribe").`;
+}
 
 async function sendEmail(smtp: Connector, action: ActionRow): Promise<{ status: string; detail: string }> {
   const cfg = JSON.parse(smtp.secrets || '{}');
   const meta = action.meta ? JSON.parse(action.meta) : {};
-  const to: string[] = ([] as string[]).concat(meta.to || meta.recipients || []).filter(Boolean);
-  if (!to.length) {
-    return { status: 'ready', detail: 'Approved, but no recipient was specified — email is ready to send once you add a recipient.' };
-  }
   const transport = nodemailer.createTransport({
     host: cfg.host, port: Number(cfg.port) || 587,
     secure: cfg.secure ?? Number(cfg.port) === 465,
     auth: cfg.user ? { user: cfg.user, pass: cfg.pass } : undefined,
   });
-  const info = await transport.sendMail({
-    from: cfg.from || cfg.user,
-    to: to.join(', '),
-    subject: meta.subject || action.title,
-    text: (action.content || action.summary || '') + OPT_OUT,
-  });
-  return { status: 'done', detail: `Email sent to ${to.length} recipient(s) (id ${info.messageId}).` };
+  const from = cfg.from || cfg.user;
+  const subjectTpl = meta.subject || action.title;
+  const bodyTpl = action.content || action.summary || '';
+
+  // Build the recipient set: a saved list (preferred) or manually-specified addresses.
+  let recips: Recipient[];
+  if (meta.list_id) {
+    recips = activeRecipients(meta.list_id, action.project_id);
+    if (!recips.length) return { status: 'ready', detail: 'The selected list has no active recipients (empty, or everyone unsubscribed).' };
+  } else {
+    const to: string[] = ([] as string[]).concat(meta.to || meta.recipients || []).map((e: string) => String(e).trim().toLowerCase()).filter(Boolean);
+    if (!to.length) return { status: 'ready', detail: 'Approved — choose an email list (or add recipients) to send this.' };
+    recips = to.map((email) => ({ email } as Recipient));
+  }
+
+  let sent = 0, failed = 0;
+  for (const r of recips) {
+    try {
+      await transport.sendMail({
+        from, to: r.email,
+        subject: personalize(subjectTpl, r),
+        text: personalize(bodyTpl, r) + unsubFooter(action.project_id, r.email),
+      });
+      sent++;
+    } catch { failed++; }
+  }
+  if (!sent) return { status: 'failed', detail: `Could not send to any of the ${recips.length} recipient(s) — check SMTP settings.` };
+  return { status: 'done', detail: `Sent to ${sent} recipient(s)${failed ? ` (${failed} failed)` : ''}.` };
 }
 
 const APP_BASE = process.env.APP_BASE_URL || 'http://localhost:4400';

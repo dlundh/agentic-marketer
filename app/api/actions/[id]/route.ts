@@ -16,7 +16,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json(ok ? { ok } : { ok, error: 'Could not revise this action.' }, { status: ok ? 200 : 400 });
   }
   if (body.action === 'approve') {
-    const res = await approveAction(id);
+    const res = await approveAction(id, { list_id: body.list_id });
     return NextResponse.json(res, { status: res.ok ? 200 : 400 });
   }
   return NextResponse.json({ error: 'unknown action' }, { status: 400 });

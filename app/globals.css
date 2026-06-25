@@ -252,6 +252,9 @@ a { color: var(--accent); }
 .action-content pre { white-space: pre-wrap; word-break: break-word; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-size: 12.5px; line-height: 1.55; font-family: inherit; color: var(--text); margin: 0; }
 .copy { position: absolute; top: 8px; right: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); font-size: 11px; padding: 4px 8px; border-radius: 7px; }
 .copy:hover { color: var(--text); }
+.list-row { display: flex; align-items: center; gap: 8px; padding: 4px 14px 8px; flex-wrap: wrap; }
+.list-select { background: var(--bg-soft); border: 1px solid var(--border); color: var(--text); border-radius: 9px; padding: 7px 10px; font-size: 12.5px; font-family: inherit; outline: none; }
+.list-select:focus { border-color: var(--accent); }
 .action-actions { display: flex; gap: 8px; padding: 0 14px 12px; }
 .approve { border: 1px solid rgba(61,220,151,.4); background: rgba(61,220,151,.12); color: var(--green); font-weight: 700; padding: 8px 16px; border-radius: 9px; font-size: 13px; }
 .approve:hover { background: rgba(61,220,151,.2); }

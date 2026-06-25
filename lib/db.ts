@@ -138,6 +138,34 @@ function init(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_campaigns_proj ON campaigns(project_id);
     CREATE INDEX IF NOT EXISTS idx_actions_proj   ON actions(project_id);
     CREATE INDEX IF NOT EXISTS idx_actions_camp   ON actions(campaign_id);
+
+    -- Email outreach: named recipient lists + a per-project suppression set.
+    CREATE TABLE IF NOT EXISTS email_lists (
+      id          TEXT PRIMARY KEY,
+      project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name        TEXT NOT NULL,
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS recipients (
+      id          TEXT PRIMARY KEY,
+      list_id     TEXT NOT NULL REFERENCES email_lists(id) ON DELETE CASCADE,
+      project_id  TEXT NOT NULL,
+      email       TEXT NOT NULL,
+      name        TEXT,
+      company     TEXT,
+      status      TEXT NOT NULL DEFAULT 'active',   -- active | unsubscribed
+      created_at  INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_recipients_unique ON recipients(list_id, email);
+    CREATE INDEX IF NOT EXISTS idx_recipients_list ON recipients(list_id);
+    CREATE TABLE IF NOT EXISTS suppressions (
+      project_id  TEXT NOT NULL,
+      email       TEXT NOT NULL,
+      reason      TEXT,
+      created_at  INTEGER NOT NULL,
+      PRIMARY KEY (project_id, email)
+    );
   `);
 
   // Migration: add connectors.excluded to DBs created before this column existed.
@@ -373,6 +401,71 @@ export function disconnectConnector(key: string) {
 export function setConnectorExcluded(key: string, excluded: boolean) {
   db.prepare(`UPDATE connectors SET excluded=?, updated_at=? WHERE key=?`).run(excluded ? 1 : 0, now(), key);
 }
+
+// --- email lists / recipients / suppressions --------------------------------
+
+export type EmailList = { id: string; project_id: string; name: string; created_at: number; updated_at: number; total?: number; active?: number };
+export type Recipient = { id: string; list_id: string; project_id: string; email: string; name: string | null; company: string | null; status: string; created_at: number };
+
+const normEmail = (e: string) => String(e || '').trim().toLowerCase();
+
+export function createEmailList(projectId: string, name: string): EmailList {
+  const id = uid('lst_'); const t = now();
+  db.prepare(`INSERT INTO email_lists (id,project_id,name,created_at,updated_at) VALUES (?,?,?,?,?)`)
+    .run(id, projectId, name.trim() || 'Untitled list', t, t);
+  return getEmailList(id)!;
+}
+export const getEmailList = (id: string) =>
+  db.prepare(`SELECT * FROM email_lists WHERE id=?`).get(id) as EmailList | undefined;
+export function listEmailLists(projectId: string): EmailList[] {
+  return db.prepare(`
+    SELECT l.*,
+      (SELECT COUNT(*) FROM recipients r WHERE r.list_id=l.id) total,
+      (SELECT COUNT(*) FROM recipients r WHERE r.list_id=l.id AND r.status='active') active
+    FROM email_lists l WHERE l.project_id=? ORDER BY l.created_at DESC`).all(projectId) as EmailList[];
+}
+export function deleteEmailList(id: string) {
+  db.prepare(`DELETE FROM email_lists WHERE id=?`).run(id);
+}
+
+// Insert recipients, de-duped per list; auto-unsubscribe any already suppressed.
+export function addRecipients(listId: string, projectId: string, rows: { email: string; name?: string; company?: string }[]): number {
+  const ins = db.prepare(`INSERT OR IGNORE INTO recipients (id,list_id,project_id,email,name,company,status,created_at) VALUES (?,?,?,?,?,?,?,?)`);
+  const supp = db.prepare(`SELECT 1 FROM suppressions WHERE project_id=? AND email=?`);
+  let n = 0; const t = now();
+  for (const r of rows) {
+    const email = normEmail(r.email);
+    if (!email) continue;
+    const status = supp.get(projectId, email) ? 'unsubscribed' : 'active';
+    const res = ins.run(uid('rcp_'), listId, projectId, email, r.name?.trim() || null, r.company?.trim() || null, status, t);
+    if (res.changes) n++;
+  }
+  if (n) db.prepare(`UPDATE email_lists SET updated_at=? WHERE id=?`).run(t, listId);
+  return n;
+}
+export const listRecipients = (listId: string) =>
+  db.prepare(`SELECT * FROM recipients WHERE list_id=? ORDER BY created_at ASC`).all(listId) as Recipient[];
+// Active recipients of a list, excluding the project suppression set.
+export function activeRecipients(listId: string, projectId: string): Recipient[] {
+  return db.prepare(`
+    SELECT * FROM recipients WHERE list_id=? AND status='active'
+      AND email NOT IN (SELECT email FROM suppressions WHERE project_id=?)
+    ORDER BY created_at ASC`).all(listId, projectId) as Recipient[];
+}
+
+export function addSuppressions(projectId: string, emails: string[], reason = 'manual') {
+  const ins = db.prepare(`INSERT OR IGNORE INTO suppressions (project_id,email,reason,created_at) VALUES (?,?,?,?)`);
+  const mark = db.prepare(`UPDATE recipients SET status='unsubscribed' WHERE project_id=? AND email=?`);
+  const t = now(); let n = 0;
+  for (const raw of emails) {
+    const email = normEmail(raw); if (!email) continue;
+    if (ins.run(projectId, email, reason, t).changes) n++;
+    mark.run(projectId, email);
+  }
+  return n;
+}
+export const listSuppressions = (projectId: string) =>
+  db.prepare(`SELECT email, reason, created_at FROM suppressions WHERE project_id=? ORDER BY created_at DESC`).all(projectId) as { email: string; reason: string; created_at: number }[];
 
 export function createAction(a: {
   project_id: string; campaign_id: string; job_id?: string; channel: string; kind: string;

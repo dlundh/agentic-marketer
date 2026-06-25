@@ -236,9 +236,23 @@ export function launchOptimizer(projectId: string) {
 
 // Approve a proposed action: reserve budget (hard cap), then execute it via the
 // best connected channel. Returns an error string if it would bust the budget.
-export async function approveAction(actionId: string): Promise<{ ok: boolean; error?: string }> {
-  const a = getAction(actionId);
+export async function approveAction(actionId: string, opts: { list_id?: string } = {}): Promise<{ ok: boolean; error?: string }> {
+  let a = getAction(actionId);
   if (!a || !['proposed', 'failed'].includes(a.status)) return { ok: false, error: 'Action is not awaiting approval.' };
+  // Attach the chosen email list before sending.
+  if (opts.list_id) {
+    const meta = a.meta ? JSON.parse(a.meta) : {};
+    meta.list_id = opts.list_id;
+    updateAction(actionId, { meta: JSON.stringify(meta) });
+    a = getAction(actionId)!;
+  }
+  // Email/outreach must target a recipient list (or explicit recipients).
+  if (['email', 'outreach'].includes(a.kind)) {
+    const meta = a.meta ? JSON.parse(a.meta) : {};
+    if (!meta.list_id && !meta.to && !meta.recipients) {
+      return { ok: false, error: 'Pick an email list to send to (or add recipients) before approving.' };
+    }
+  }
   // Never let Approve produce a "now do it yourself" task: require a real executor.
   if (!isAutoExecutable(a)) {
     return { ok: false, error: a.kind === 'account'
