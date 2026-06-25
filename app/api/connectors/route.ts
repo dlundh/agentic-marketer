@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { listConnectors, upsertConnector, disconnectConnector } from '@/lib/db';
+import { listConnectors, upsertConnector, disconnectConnector, setConnectorExcluded } from '@/lib/db';
 import { CHANNELS, seedConnectors, channelDef, pingWebhook, verifySmtp } from '@/lib/connectors';
 
 export const runtime = 'nodejs';
@@ -14,7 +14,7 @@ export async function GET() {
     const row = byKey.get(ch.key);
     return {
       key: ch.key, label: ch.label, category: ch.category, executor: ch.executor,
-      paid: !!ch.paid, note: ch.note, connected: !!row?.connected,
+      paid: !!ch.paid, note: ch.note, connected: !!row?.connected, excluded: !!row?.excluded,
     };
   });
   return NextResponse.json({ connectors });
@@ -29,6 +29,12 @@ export async function POST(req: Request) {
   const key = String(body.key || '');
   const def = channelDef(key);
   if (!def) return NextResponse.json({ error: 'unknown channel' }, { status: 400 });
+
+  // Toggle whether the swarm generates actions for this channel (kept connected).
+  if (typeof body.exclude === 'boolean') {
+    setConnectorExcluded(key, body.exclude);
+    return NextResponse.json({ ok: true, excluded: body.exclude });
+  }
 
   if (body.connect === false) {
     disconnectConnector(key);

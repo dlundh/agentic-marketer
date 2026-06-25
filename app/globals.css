@@ -315,6 +315,9 @@ a { color: var(--accent); }
 .mini.danger { color: var(--muted); }
 .mini.danger:hover { color: var(--red); border-color: rgba(240,107,107,.4); }
 .chan-msg { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.chan-gen { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); margin-top: 8px; cursor: pointer; }
+.chan-gen input { accent-color: var(--green); }
+.excluded-tag { font-size: 10px; font-weight: 700; color: var(--amber); background: rgba(245,177,76,.14); padding: 2px 7px; border-radius: 5px; }
 .chan-form { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .chan-form .field { margin-top: 0; }
 .guide { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }

@@ -118,6 +118,7 @@ export function autoChannels(): string[] {
   for (const ch of CHANNELS) {
     if (ch.key === 'webhook' || ch.key === 'smtp') continue;
     const own = getConnector(ch.key);
+    if (own?.excluded) continue; // user opted this channel out of action generation
     const s = own?.connected ? safeJSON(own.secrets) : null;
     const native = ['mastodon', 'x', 'reddit', 'linkedin'].includes(ch.key) && s?.access_token;
     const ownHook = !!s?.url;

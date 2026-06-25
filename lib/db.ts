@@ -107,6 +107,7 @@ function init(): DatabaseSync {
       executor      TEXT NOT NULL,                        -- webhook | smtp | manual
       secrets       TEXT,                                 -- JSON credentials/config
       connected     INTEGER NOT NULL DEFAULT 0,
+      excluded      INTEGER NOT NULL DEFAULT 0,            -- user opted this channel out of action generation
       created_at    INTEGER NOT NULL,
       updated_at    INTEGER NOT NULL
     );
@@ -138,6 +139,9 @@ function init(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_actions_proj   ON actions(project_id);
     CREATE INDEX IF NOT EXISTS idx_actions_camp   ON actions(campaign_id);
   `);
+
+  // Migration: add connectors.excluded to DBs created before this column existed.
+  try { db.exec(`ALTER TABLE connectors ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
 
   // NB: recovery of interrupted jobs is handled by orchestrator.reconcile(),
   // which is guarded by the live in-memory run registry so it can never flip a
@@ -305,7 +309,7 @@ export type Campaign = {
 };
 export type Connector = {
   key: string; label: string; executor: string; secrets: string | null;
-  connected: number; created_at: number; updated_at: number;
+  connected: number; excluded: number; created_at: number; updated_at: number;
 };
 export type ActionRow = {
   id: string; project_id: string; campaign_id: string; job_id: string | null;
@@ -364,6 +368,10 @@ export const listConnectors = () =>
   db.prepare(`SELECT * FROM connectors ORDER BY key ASC`).all() as Connector[];
 export function disconnectConnector(key: string) {
   db.prepare(`UPDATE connectors SET connected=0, secrets=NULL, updated_at=? WHERE key=?`).run(now(), key);
+}
+// Opt a channel in/out of action generation (without disconnecting it).
+export function setConnectorExcluded(key: string, excluded: boolean) {
+  db.prepare(`UPDATE connectors SET excluded=?, updated_at=? WHERE key=?`).run(excluded ? 1 : 0, now(), key);
 }
 
 export function createAction(a: {

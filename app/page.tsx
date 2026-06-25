@@ -16,7 +16,7 @@ type Campaign = { id: string; status: string; currency: string; budget_cents: nu
 type ActionItem = { id: string; channel: string; kind: string; title: string; summary: string | null; content: string | null; meta: string | null; cost_cents: number; status: string; result: string | null; job_id: string | null; auto?: boolean };
 type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[] };
 type Auth = { connected: boolean; method: string; detail: string };
-type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean };
+type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean; excluded?: boolean };
 
 // ----------------------------- helpers --------------------------------------
 const fmtBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -809,6 +809,10 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
     await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, connect: false }) });
     load();
   };
+  const setExclude = async (key: string, exclude: boolean) => {
+    await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, exclude }) });
+    load();
+  };
 
   const [hookBusy, setHookBusy] = useState(false); const [hookMsg, setHookMsg] = useState<string | null>(null);
   const [smtpBusy, setSmtpBusy] = useState(false); const [smtpMsg, setSmtpMsg] = useState<string | null>(null);
@@ -883,7 +887,7 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
                 <ChannelRow
                   key={c.key} c={c} webhookOn={!!webhookOn} smtpOn={!!smtpOn}
                   hasCampaign={hasCampaign} hasProject={hasProject}
-                  onConnect={connect} onDisconnect={disconnect} onCreate={onCreate}
+                  onConnect={connect} onDisconnect={disconnect} onCreate={onCreate} onExclude={setExclude}
                 />
               ))}
             </div>
@@ -894,10 +898,11 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
   );
 }
 
-function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, onDisconnect, onCreate }: {
+function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, onDisconnect, onCreate, onExclude }: {
   c: Channel; webhookOn: boolean; smtpOn: boolean; hasCampaign: boolean; hasProject: boolean;
   onConnect: (key: string, secrets: any) => Promise<{ connected: boolean; message: string }>;
   onDisconnect: (key: string) => void; onCreate: (channel: string) => Promise<string | null>;
+  onExclude: (key: string, exclude: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ handle: '', token: '', url: '' });
@@ -958,6 +963,13 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
             : <button className="mini" onClick={() => { setOpen(!open); setMsg(null); }}>{open ? 'Cancel' : 'Connect'}</button>}
         </div>
       </div>
+      {auto && (
+        <label className="chan-gen">
+          <input type="checkbox" checked={!c.excluded} onChange={(e) => onExclude(c.key, !e.target.checked)} />
+          Generate actions for this channel
+          {c.excluded && <span className="excluded-tag">excluded — swarm skips it</span>}
+        </label>
+      )}
       {createMsg && <div className="chan-msg">{createMsg}</div>}
       {open && !c.connected && (isOAuth && !webhookMode ? (
         <div className="chan-form">
