@@ -849,7 +849,7 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
 
           <div className="kgroup">
             <h4>Email (SMTP) {smtpOn && <span className="zero-pill">connected</span>}</h4>
-            <p className="note">Sends approved outreach/lifecycle email. An opt-out footer is added automatically.</p>
+            <p className="note">Your mail server — the <b>sending engine</b> behind the “Email outreach” and “Influencer” channels below (they have no separate login). Once connected, those channels can auto-send approved emails. An opt-out footer is added automatically, and the agent never invents recipients — you supply who to email.</p>
             {smtpOn ? (
               <button className="reject" onClick={() => disconnect('smtp')}>Disconnect</button>
             ) : (
