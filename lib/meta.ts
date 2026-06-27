@@ -42,6 +42,7 @@ async function gpost(path: string, token: string, body: Record<string, any>) {
 async function gdelete(id: string, token: string) {
   try { await fetch(`${GRAPH}/${id}?access_token=${encodeURIComponent(token)}`, { method: 'DELETE', signal: AbortSignal.timeout(10000) }); } catch { /* best effort */ }
 }
+export async function deleteMetaEntity(token: string, id: string) { await gdelete(id, token); }
 
 // ---- OAuth ----------------------------------------------------------------
 export function metaAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {

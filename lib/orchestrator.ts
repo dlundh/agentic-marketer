@@ -393,9 +393,55 @@ export async function approveAction(actionId: string, opts: { list_id?: string }
   return { ok: true, status: res.status, detail: res.detail };
 }
 
-// Sum of the daily budgets of currently-live ad actions (their ad sets).
+const parseMeta = (m: string | null) => { try { return m ? JSON.parse(m) : {}; } catch { return {}; } };
+const metaSecrets = () => { const c = getConnector('meta_ads'); return c?.connected && c.secrets ? JSON.parse(c.secrets) : null; };
+
+// Sum of the daily budgets of currently-live (not paused) ad actions.
 export function committedDailyCents(campaignId: string): number {
-  return listActions(campaignId).filter((x) => x.kind === 'ad' && x.status === 'done').reduce((s, x) => s + x.cost_cents, 0);
+  return listActions(campaignId)
+    .filter((x) => x.kind === 'ad' && x.status === 'done' && !parseMeta(x.meta).ad_paused)
+    .reduce((s, x) => s + x.cost_cents, 0);
+}
+
+// Per-ad controls (each ad action = its own Meta campaign).
+export async function pauseAd(actionId: string): Promise<{ ok: boolean; error?: string }> {
+  const a = getAction(actionId);
+  if (!a || a.kind !== 'ad' || a.status !== 'done') return { ok: false, error: 'Not a live ad.' };
+  const meta = parseMeta(a.meta); const s = metaSecrets();
+  if (s?.access_token && meta.meta_ids?.campaignId) {
+    try { const { setMetaStatus } = await import('./meta'); await setMetaStatus(s.access_token, meta.meta_ids.campaignId, 'PAUSED'); }
+    catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
+  }
+  updateAction(actionId, { meta: JSON.stringify({ ...meta, ad_paused: true }) });
+  emitEvent({ type: 'finding', projectId: a.project_id });
+  return { ok: true };
+}
+export async function resumeAd(actionId: string): Promise<{ ok: boolean; error?: string }> {
+  const a = getAction(actionId);
+  if (!a || a.kind !== 'ad' || a.status !== 'done') return { ok: false, error: 'Not a paused ad.' };
+  const block = adSpendBlock(getCampaign(a.campaign_id), a.cost_cents);
+  if (block) return { ok: false, error: block };
+  const meta = parseMeta(a.meta); const s = metaSecrets();
+  if (s?.access_token && meta.meta_ids) {
+    try {
+      const { setMetaStatus } = await import('./meta');
+      for (const id of [meta.meta_ids.campaignId, meta.meta_ids.adsetId, meta.meta_ids.adId]) if (id) await setMetaStatus(s.access_token, id, 'ACTIVE');
+    } catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
+  }
+  updateAction(actionId, { meta: JSON.stringify({ ...meta, ad_paused: false }) });
+  emitEvent({ type: 'finding', projectId: a.project_id });
+  return { ok: true };
+}
+export async function removeAd(actionId: string): Promise<{ ok: boolean; error?: string }> {
+  const a = getAction(actionId);
+  if (!a || a.kind !== 'ad') return { ok: false, error: 'Not an ad.' };
+  const meta = parseMeta(a.meta); const s = metaSecrets();
+  if (s?.access_token && meta.meta_ids?.campaignId) {
+    try { const { deleteMetaEntity } = await import('./meta'); await deleteMetaEntity(s.access_token, meta.meta_ids.campaignId); } catch { /* best effort */ }
+  }
+  updateAction(actionId, { status: 'rejected', result: 'Ad removed from Meta.' });
+  emitEvent({ type: 'finding', projectId: a.project_id });
+  return { ok: true };
 }
 // Returns a block reason if this ad spend isn't allowed, else ''.
 function adSpendBlock(c: Campaign | undefined, dailyCents: number): string {

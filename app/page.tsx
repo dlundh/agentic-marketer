@@ -188,6 +188,14 @@ export default function Page() {
     loadDetail(currentId);
   };
 
+  const adControl = async (actionId: string, action: 'pause_ad' | 'resume_ad' | 'remove_ad') => {
+    setError(null);
+    const res = await fetch(`/api/actions/${actionId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok && d.error) setError(d.error);
+    if (currentId) loadDetail(currentId);
+  };
+
   const createAccount = async (channel: string): Promise<string | null> => {
     if (!currentId) return 'Open a project first.';
     const res = await fetch(`/api/projects/${currentId}/account`, {
@@ -253,6 +261,7 @@ export default function Page() {
                 onOpenChannels={() => setShowChannels(true)}
                 onOpenLists={() => setShowLists(true)}
                 onCampaignAction={campaignAction}
+                onAdControl={adControl}
                 lists={detail.lists || []}
                 anyExecLive={detail.jobs.some((j) => j.phase === 'execution' && j.live)}
               />
@@ -537,6 +546,7 @@ const CH_LABEL: Record<string, string> = {
 };
 const chLabel = (k: string) => CH_LABEL[k] || k;
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+const metaPaused = (a: ActionItem) => { try { return !!(a.meta && JSON.parse(a.meta).ad_paused); } catch { return false; } };
 
 // Per-channel Make.com recipe: which module + which text field to map.
 const WEBHOOK_RECIPE: Record<string, { action: string; field: string }> = {
@@ -638,10 +648,11 @@ function AdControls({ campaign, onCampaignAction, liveAds }: { campaign: Campaig
   );
 }
 
-function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGenerate, onOpenChannels, onOpenLists, onCampaignAction, lists, anyExecLive }: {
+function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGenerate, onOpenChannels, onOpenLists, onCampaignAction, onAdControl, lists, anyExecLive }: {
   campaign: Campaign; actions: ActionItem[]; onDecide: (id: string, a: 'approve' | 'reject', list_id?: string) => void;
   onRevise: (id: string, feedback: string) => void; onOptimize: () => void; onGenerate: () => void;
-  onOpenChannels: () => void; onOpenLists: () => void; onCampaignAction: (body: any) => void; lists: EmailList[]; anyExecLive: boolean;
+  onOpenChannels: () => void; onOpenLists: () => void; onCampaignAction: (body: any) => void;
+  onAdControl: (id: string, a: 'pause_ad' | 'resume_ad' | 'remove_ad') => void; lists: EmailList[]; anyExecLive: boolean;
 }) {
   const [autoOnly, setAutoOnly] = useState(true);
   const [showLive, setShowLive] = useState(false);
@@ -671,7 +682,7 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
           </div>
         </div>
         {campaign.budget_cents > 0 && <div className="meter"><div className="meter-fill" style={{ width: `${pct}%` }} /></div>}
-        <AdControls campaign={campaign} onCampaignAction={onCampaignAction} liveAds={actions.filter((a) => a.kind === 'ad' && a.status === 'done').length} />
+        <AdControls campaign={campaign} onCampaignAction={onCampaignAction} liveAds={actions.filter((a) => a.kind === 'ad' && a.status === 'done' && !metaPaused(a)).length} />
         <div className="note" style={{ fontSize: 12, marginTop: 8 }}>
           Posts are approval-gated. Ad spend follows your autonomy mode below, always inside the total + daily caps and the kill switch. {anyExecLive && <span className="spin">⟳</span>} {anyExecLive && 'Agents are working…'}
         </div>
@@ -686,7 +697,7 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
           </label>
         </div>
         {proposed.length === 0 && <div className="empty" style={{ padding: 18 }}>{anyExecLive ? 'Agents are still working…' : autoOnly && hiddenManual > 0 ? 'No auto-publishable actions yet — connect more channels under ⚙ Channels.' : 'No actions waiting.'}</div>}
-        {proposed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} />)}
+        {proposed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} onAdControl={onAdControl} />)}
         {hiddenManual > 0 && (
           <div className="note" style={{ fontSize: 12, marginTop: 8 }}>
             {autoOnly ? `${hiddenManual} manual / unconnected action${hiddenManual === 1 ? '' : 's'} hidden. ` : ''}
@@ -697,14 +708,14 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
         )}
 
         {failed.length > 0 && <div className="queue-col-head" style={{ marginTop: 18, color: 'var(--red)' }}>⚠ Failed — needs attention · {failed.length}</div>}
-        {failed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} />)}
+        {failed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} onAdControl={onAdControl} />)}
 
         {live.length > 0 && (
           <button className="queue-col-head section-toggle" style={{ marginTop: 18 }} onClick={() => setShowLive((v) => !v)}>
             <span className="caret">{showLive ? '▾' : '▸'}</span> Approved &amp; executed · {live.length}
           </button>
         )}
-        {showLive && live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} />)}
+        {showLive && live.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} onAdControl={onAdControl} />)}
 
         {rejected.length > 0 && <div className="note" style={{ fontSize: 12, marginTop: 14 }}>{rejected.length} rejected.</div>}
       </div>
@@ -712,9 +723,10 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
   );
 }
 
-function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenLists }: {
+function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenLists, onAdControl }: {
   a: ActionItem; onDecide: (id: string, x: 'approve' | 'reject', list_id?: string) => void; onRevise: (id: string, feedback: string) => void;
   onOpenChannels: () => void; lists?: EmailList[]; onOpenLists?: () => void;
+  onAdControl?: (id: string, a: 'pause_ad' | 'resume_ad' | 'remove_ad') => void;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -812,6 +824,15 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenL
         <div className="action-result">
           {a.status === 'done' ? '✅ ' : a.status === 'sent' ? '📤 ' : '📋 '}{linkify(a.result)}
           {meta.live_url && <> · <a href={meta.live_url} target="_blank" rel="noreferrer">View live ↗</a></>}
+        </div>
+      )}
+      {a.kind === 'ad' && a.status === 'done' && onAdControl && (
+        <div className="action-actions">
+          <span className={`act-status ${meta.ad_paused ? 'as-ready' : 'as-done'}`}>{meta.ad_paused ? '⏸ paused' : '● live'}</span>
+          {meta.ad_paused
+            ? <button className="approve" onClick={() => onAdControl(a.id, 'resume_ad')}>▶ Resume</button>
+            : <button className="reject" onClick={() => onAdControl(a.id, 'pause_ad')}>⏸ Pause</button>}
+          <button className="reject" onClick={() => onAdControl(a.id, 'remove_ad')}>🗑 Remove</button>
         </div>
       )}
 
