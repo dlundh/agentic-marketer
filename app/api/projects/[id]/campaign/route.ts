@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   launchCampaign, launchOptimizer, generateActions,
-  addCampaignFunds, setDailyCap, setAutonomy, setKillSwitch, runAdOptimizer,
+  addCampaignFunds, removeCampaignFunds, setDailyCap, setAutonomy, setKillSwitch, runAdOptimizer,
 } from '@/lib/orchestrator';
 
 export const runtime = 'nodejs';
@@ -18,6 +18,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     case 'optimize': return NextResponse.json({ ok: launchOptimizer(id) });
     case 'generate': { const r = generateActions(id); return NextResponse.json(r, { status: r.ok ? 200 : 400 }); }
     case 'add_funds': return NextResponse.json({ ok: addCampaignFunds(id, usdToCents(body.amount_usd)) });
+    case 'remove_funds': return NextResponse.json({ ok: removeCampaignFunds(id, usdToCents(body.amount_usd)) });
     case 'daily_cap': return NextResponse.json({ ok: setDailyCap(id, usdToCents(body.amount_usd)) });
     case 'autonomy': return NextResponse.json({ ok: setAutonomy(id, String(body.mode || '')) });
     case 'kill': return NextResponse.json({ ok: await setKillSwitch(id, !!body.paused) });

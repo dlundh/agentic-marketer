@@ -616,9 +616,10 @@ function AdControls({ campaign, onCampaignAction, liveAds }: { campaign: Campaig
         </button>
       </div>
       <div className="adctl-row">
-        <label className="adctl-field"><span>＋ Add funds $</span>
+        <label className="adctl-field"><span>Funds $</span>
           <input className="mini-input" type="number" min="0" value={funds} onChange={(e) => setFunds(e.target.value)} placeholder="100" />
-          <button className="mini" disabled={!Number(funds)} onClick={() => { onCampaignAction({ action: 'add_funds', amount_usd: Number(funds) }); setFunds(''); }}>Add</button>
+          <button className="mini" disabled={!Number(funds)} onClick={() => { onCampaignAction({ action: 'add_funds', amount_usd: Number(funds) }); setFunds(''); }}>＋ Add</button>
+          <button className="mini" disabled={!Number(funds)} title="Lower the budget (can't go below what's already been spent)" onClick={() => { onCampaignAction({ action: 'remove_funds', amount_usd: Number(funds) }); setFunds(''); }}>－ Remove</button>
         </label>
         <label className="adctl-field"><span>Daily cap $</span>
           <input className="mini-input" type="number" min="0" value={cap} onChange={(e) => setCap(e.target.value)} placeholder="none" />

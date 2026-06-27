@@ -2,7 +2,7 @@ import {
   createProject, createJob, updateJob, getJob, getProject, updateProject, listJobs,
   listFindings, listAllActiveJobs, createCampaign, getCampaign, getCampaignByProject,
   updateCampaign, getAction, updateAction, reserveSpend, refundSpend, resetStaleRevisions,
-  addFunds, setSpend, listActions, getConnector,
+  addFunds, removeFunds, setSpend, listActions, getConnector,
   type Job, type ActionRow, type Campaign,
 } from './db';
 import { emitEvent } from './events';
@@ -235,6 +235,10 @@ export function createAccountKit(projectId: string, channel: string): { ok: bool
 export function addCampaignFunds(projectId: string, cents: number) {
   const c = getCampaignByProject(projectId); if (!c) return false;
   addFunds(c.id, cents); emitEvent({ type: 'project', projectId }); return true;
+}
+export function removeCampaignFunds(projectId: string, cents: number) {
+  const c = getCampaignByProject(projectId); if (!c) return false;
+  removeFunds(c.id, cents); emitEvent({ type: 'project', projectId }); return true;
 }
 export function setDailyCap(projectId: string, cents: number) {
   const c = getCampaignByProject(projectId); if (!c) return false;

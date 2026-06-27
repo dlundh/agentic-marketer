@@ -384,6 +384,11 @@ export function addFunds(campaignId: string, cents: number) {
   if (cents <= 0) return;
   db.prepare(`UPDATE campaigns SET budget_cents=budget_cents+?, updated_at=? WHERE id=?`).run(cents, now(), campaignId);
 }
+// Remove funds = lower the ceiling, but never below what's already been spent.
+export function removeFunds(campaignId: string, cents: number) {
+  if (cents <= 0) return;
+  db.prepare(`UPDATE campaigns SET budget_cents=MAX(spent_cents, budget_cents-?), updated_at=? WHERE id=?`).run(cents, now(), campaignId);
+}
 // Record actual spend reported by the ad platform (idempotent set, not increment).
 export function setSpend(campaignId: string, cents: number) {
   db.prepare(`UPDATE campaigns SET spent_cents=?, updated_at=? WHERE id=?`).run(Math.max(0, Math.round(cents)), now(), campaignId);
