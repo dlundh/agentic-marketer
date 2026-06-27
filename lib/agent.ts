@@ -147,6 +147,9 @@ function buildTools(job: Job, outcome: RunOutcome) {
       targeting: z.string().optional().describe('Audience / targeting / community + posting norms'),
       schedule: z.string().optional().describe('When to publish (e.g. "Tue 9am", "launch day")'),
       rationale: z.string().optional().describe('Why this is high-leverage for the budget'),
+      image_url: z.string().optional().describe('REQUIRED for ads: a public image URL for the creative (app icon, screenshot, or site OG image). Meta ads fail without one.'),
+      headline: z.string().optional().describe('Short ad headline (for ads)'),
+      link: z.string().optional().describe('Destination URL for ads (defaults to the product URL)'),
     },
     async (args) => {
       const c = getCampaignByProject(projectId);
@@ -159,7 +162,8 @@ function buildTools(job: Job, outcome: RunOutcome) {
         channel: args.channel, kind: args.kind, title: args.title, summary: args.summary,
         content: args.content, cost_cents: cost,
         meta: { recipients: args.recipients, subject: args.subject, targeting: args.targeting,
-                schedule: args.schedule, rationale: args.rationale, overBudget },
+                schedule: args.schedule, rationale: args.rationale, overBudget,
+                image_url: args.image_url, headline: args.headline, link: args.link },
       });
       log(job, 'action', `${channelDef(args.channel).label} · ${args.kind}${cost ? ` · $${(cost / 100).toFixed(2)}` : ''}`, args.title);
       emitEvent({ type: 'finding', projectId, jobId: job.id });
@@ -324,7 +328,8 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
     ].join('\n'),
     ads: [
       `YOUR ROLE — Paid Advertising (strictly budget-bound):`,
-      `Call check_budget first. Design paid experiments for your in-scope channels that fit the remaining budget. If budget is low/zero, first search the web for current free ad credits/coupons (Google Ads, Microsoft Advertising, Meta, etc.) and propose $0 or minimal-cost tests. For each experiment use propose_action kind "ad" with the hook, primary text, headline, CTA in \`content\`, audience in \`targeting\`, and a realistic cost_usd. The SUM of your proposed paid spend must stay within the remaining budget.`,
+      `Call check_budget first. Design paid experiments for your in-scope channels that fit the remaining budget. If budget is low/zero, first search the web for current free ad credits/coupons (Google Ads, Microsoft Advertising, Meta, etc.) and propose $0 or minimal-cost tests. For each experiment use propose_action kind "ad" with the hook + primary text in \`content\`, audience in \`targeting\`, and a realistic cost_usd (this is the DAILY budget for the ad).`,
+      `EVERY ad MUST include: a short \`headline\`, a destination \`link\` (the product URL), and an \`image_url\` — a PUBLIC image for the creative. Use WebFetch on the product page / App Store listing to find a real image URL (app icon, screenshot, or OG image); Meta ads FAIL to launch without an image. The SUM of your proposed daily ad budgets must stay within the remaining budget.`,
     ].join('\n'),
     influencer: [
       `YOUR ROLE — Influencer & Creator Outreach:`,

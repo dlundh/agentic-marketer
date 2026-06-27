@@ -18,7 +18,8 @@ type EmailList = { id: string; name: string; total?: number; active?: number };
 type Directive = { id: string; text: string; created_at: number };
 type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[]; lists?: EmailList[]; directives?: Directive[] };
 type Auth = { connected: boolean; method: string; detail: string };
-type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean; excluded?: boolean };
+type MetaSel = { accounts: { id: string; name: string }[]; pages: { id: string; name: string }[]; ad_account_id: string; page_id: string; default_image_url: string; handle: string };
+type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean; excluded?: boolean; meta?: MetaSel };
 
 // ----------------------------- helpers --------------------------------------
 const fmtBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -1001,6 +1002,10 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
     await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, exclude }) });
     load();
   };
+  const selectMeta = async (sel: Partial<MetaSel>) => {
+    await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'meta_ads', select: sel }) });
+    load();
+  };
 
   const [hookBusy, setHookBusy] = useState(false); const [hookMsg, setHookMsg] = useState<string | null>(null);
   const [smtpBusy, setSmtpBusy] = useState(false); const [smtpMsg, setSmtpMsg] = useState<string | null>(null);
@@ -1075,7 +1080,7 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
                 <ChannelRow
                   key={c.key} c={c} webhookOn={!!webhookOn} smtpOn={!!smtpOn}
                   hasCampaign={hasCampaign} hasProject={hasProject}
-                  onConnect={connect} onDisconnect={disconnect} onCreate={onCreate} onExclude={setExclude}
+                  onConnect={connect} onDisconnect={disconnect} onCreate={onCreate} onExclude={setExclude} onMetaSelect={selectMeta}
                 />
               ))}
             </div>
@@ -1086,11 +1091,38 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
   );
 }
 
-function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, onDisconnect, onCreate, onExclude }: {
+// Meta Ads: pick which ad account + Page to spend through, and a default ad image.
+function MetaConfig({ meta, onSelect }: { meta: MetaSel; onSelect: (sel: any) => void }) {
+  const [img, setImg] = useState(meta.default_image_url || '');
+  return (
+    <div className="meta-cfg">
+      <div className="note" style={{ fontSize: 11.5, fontWeight: 600 }}>Ad spend settings</div>
+      <label className="meta-field"><span>Ad account</span>
+        <select className="list-select" value={meta.ad_account_id} onChange={(e) => onSelect({ ad_account_id: e.target.value })}>
+          {!meta.accounts.length && <option value="">(no ad accounts found)</option>}
+          {meta.accounts.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.id})</option>)}
+        </select>
+      </label>
+      <label className="meta-field"><span>Page</span>
+        <select className="list-select" value={meta.page_id} onChange={(e) => onSelect({ page_id: e.target.value })}>
+          {!meta.pages.length && <option value="">(no Pages found)</option>}
+          {meta.pages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </label>
+      <label className="meta-field"><span>Default ad image URL</span>
+        <input className="field" style={{ marginTop: 0 }} placeholder="https://…/app-icon.png  (used when an ad has no image)" value={img} onChange={(e) => setImg(e.target.value)} />
+        <button className="mini" onClick={() => onSelect({ default_image_url: img.trim() })}>Save</button>
+      </label>
+      <div className="note" style={{ fontSize: 11 }}>Every Meta ad needs an image — agents try to find one, and this is the fallback. Use your App Store icon or a hosted brand image.</div>
+    </div>
+  );
+}
+
+function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, onDisconnect, onCreate, onExclude, onMetaSelect }: {
   c: Channel; webhookOn: boolean; smtpOn: boolean; hasCampaign: boolean; hasProject: boolean;
   onConnect: (key: string, secrets: any) => Promise<{ connected: boolean; message: string }>;
   onDisconnect: (key: string) => void; onCreate: (channel: string) => Promise<string | null>;
-  onExclude: (key: string, exclude: boolean) => void;
+  onExclude: (key: string, exclude: boolean) => void; onMetaSelect?: (sel: any) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ handle: '', token: '', url: '' });
@@ -1159,6 +1191,7 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
           {c.excluded && <span className="excluded-tag">excluded — swarm skips it</span>}
         </label>
       )}
+      {c.key === 'meta_ads' && c.connected && c.meta && onMetaSelect && <MetaConfig meta={c.meta} onSelect={onMetaSelect} />}
       {createMsg && <div className="chan-msg">{createMsg}</div>}
       {open && !c.connected && (isOAuth && !webhookMode ? (
         <div className="chan-form">

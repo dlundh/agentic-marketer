@@ -423,6 +423,12 @@ export const listConnectors = () =>
 export function disconnectConnector(key: string) {
   db.prepare(`UPDATE connectors SET connected=0, secrets=NULL, updated_at=? WHERE key=?`).run(now(), key);
 }
+// Merge a partial into a connector's secrets JSON (keeps the token intact).
+export function updateConnectorSecrets(key: string, partial: Record<string, any>) {
+  const c = getConnector(key); if (!c) return;
+  const secrets = { ...(c.secrets ? JSON.parse(c.secrets) : {}), ...partial };
+  db.prepare(`UPDATE connectors SET secrets=?, updated_at=? WHERE key=?`).run(JSON.stringify(secrets), now(), key);
+}
 // Opt a channel in/out of action generation (without disconnecting it).
 export function setConnectorExcluded(key: string, excluded: boolean) {
   db.prepare(`UPDATE connectors SET excluded=?, updated_at=? WHERE key=?`).run(excluded ? 1 : 0, now(), key);

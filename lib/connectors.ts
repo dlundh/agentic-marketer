@@ -272,11 +272,13 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
       const m = safeJSON(action.meta) || {};
       const link = m.link || getProject(action.project_id)?.url || '';
       if (!link) return { status: 'ready', detail: 'Ad is ready but has no destination URL — add a link before launching.' };
+      const imageUrl = m.image_url || m.picture || s.default_image_url;
+      if (!imageUrl) return { status: 'ready', detail: 'Ad needs a creative image. Set a default ad image URL under ⚙ Channels → Meta Ads, or add one to this action, then approve.' };
       const spec = {
         name: action.title.slice(0, 80), objective: m.objective || 'OUTCOME_TRAFFIC',
         dailyBudgetCents: action.cost_cents || 500,
         message: action.content || action.summary || '', headline: m.headline || action.title.slice(0, 40),
-        description: m.description || '', link, imageUrl: m.image_url || m.picture, cta: m.cta || 'LEARN_MORE',
+        description: m.description || '', link, imageUrl, cta: m.cta || 'LEARN_MORE',
         countries: m.countries, ageMin: m.age_min, ageMax: m.age_max, interests: m.interests,
       };
       try {

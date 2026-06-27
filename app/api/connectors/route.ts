@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { listConnectors, upsertConnector, disconnectConnector, setConnectorExcluded } from '@/lib/db';
+import { listConnectors, upsertConnector, disconnectConnector, setConnectorExcluded, updateConnectorSecrets } from '@/lib/db';
 import { CHANNELS, seedConnectors, channelDef, pingWebhook, verifySmtp } from '@/lib/connectors';
 
 export const runtime = 'nodejs';
@@ -12,10 +12,16 @@ export async function GET() {
   const byKey = new Map(rows.map((r) => [r.key, r]));
   const connectors = CHANNELS.map((ch) => {
     const row = byKey.get(ch.key);
-    return {
+    const base: any = {
       key: ch.key, label: ch.label, category: ch.category, executor: ch.executor,
       paid: !!ch.paid, note: ch.note, connected: !!row?.connected, excluded: !!row?.excluded,
     };
+    // Expose the non-sensitive Meta selection (accounts/pages/choices) for the picker.
+    if (ch.key === 'meta_ads' && row?.connected && row.secrets) {
+      const s = JSON.parse(row.secrets);
+      base.meta = { accounts: s.accounts || [], pages: s.pages || [], ad_account_id: s.ad_account_id || '', page_id: s.page_id || '', default_image_url: s.default_image_url || '', handle: s.handle || '' };
+    }
+    return base;
   });
   return NextResponse.json({ connectors });
 }
@@ -34,6 +40,16 @@ export async function POST(req: Request) {
   if (typeof body.exclude === 'boolean') {
     setConnectorExcluded(key, body.exclude);
     return NextResponse.json({ ok: true, excluded: body.exclude });
+  }
+
+  // Update Meta selection (ad account / page / default ad image) without re-auth.
+  if (body.select && key === 'meta_ads') {
+    const patch: any = {};
+    for (const f of ['ad_account_id', 'page_id', 'default_image_url'] as const) {
+      if (body.select[f] !== undefined) patch[f] = String(body.select[f]);
+    }
+    updateConnectorSecrets('meta_ads', patch);
+    return NextResponse.json({ ok: true });
   }
 
   if (body.connect === false) {
