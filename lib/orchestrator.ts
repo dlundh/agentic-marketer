@@ -2,7 +2,7 @@ import {
   createProject, createJob, updateJob, getJob, getProject, updateProject, listJobs,
   listFindings, listAllActiveJobs, createCampaign, getCampaign, getCampaignByProject,
   updateCampaign, getAction, updateAction, reserveSpend, refundSpend, resetStaleRevisions,
-  addFunds, removeFunds, setSpend, listActions, getConnector,
+  addFunds, removeFunds, setSpend, listActions, getConnector, listActiveCampaigns,
   type Job, type ActionRow, type Campaign,
 } from './db';
 import { emitEvent } from './events';
@@ -286,6 +286,22 @@ export async function autoApproveAds(projectId: string) {
     const res = await approveAction(a.id);
     if (res.ok) anyAdLive = true; // unlock the rest once one is live
   }
+}
+
+// Background poller: every active campaign with live ads gets its real spend
+// synced and is auto-paused if it hits its cap. Runs regardless of the UI being
+// open. Guarded on globalThis so only one interval runs per process.
+const POLL_MS = 10 * 60 * 1000; // every 10 minutes
+async function pollAllCampaigns() {
+  for (const c of listActiveCampaigns()) {
+    if (listActions(c.id).some((a) => a.kind === 'ad' && a.status === 'done')) {
+      try { await runAdOptimizer(c.project_id); } catch { /* keep polling others */ }
+    }
+  }
+}
+{
+  const gp = globalThis as any;
+  if (!gp.__adPoll) gp.__adPoll = setInterval(() => { pollAllCampaigns().catch(() => {}); }, POLL_MS);
 }
 
 // Pull real spend from Meta, update the ledger, and auto-pause if the total cap

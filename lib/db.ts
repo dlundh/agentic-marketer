@@ -373,6 +373,8 @@ export const getCampaign = (id: string) =>
   db.prepare(`SELECT * FROM campaigns WHERE id=?`).get(id) as Campaign | undefined;
 export const getCampaignByProject = (projectId: string) =>
   db.prepare(`SELECT * FROM campaigns WHERE project_id=? ORDER BY created_at DESC LIMIT 1`).get(projectId) as Campaign | undefined;
+export const listActiveCampaigns = () =>
+  db.prepare(`SELECT * FROM campaigns WHERE status='active'`).all() as Campaign[];
 export function updateCampaign(id: string, patch: Partial<Campaign>) {
   const cur = getCampaign(id); if (!cur) return;
   const n = { ...cur, ...patch, updated_at: now() };
