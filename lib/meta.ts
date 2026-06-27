@@ -39,6 +39,9 @@ async function gpost(path: string, token: string, body: Record<string, any>) {
   if (!res.ok || j.error) throw metaError(path, j, res.status);
   return j;
 }
+async function gdelete(id: string, token: string) {
+  try { await fetch(`${GRAPH}/${id}?access_token=${encodeURIComponent(token)}`, { method: 'DELETE', signal: AbortSignal.timeout(10000) }); } catch { /* best effort */ }
+}
 
 // ---- OAuth ----------------------------------------------------------------
 export function metaAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {
@@ -79,30 +82,35 @@ export async function launchMetaAd(token: string, actId: string, pageId: string,
     // set's daily budget stays strict, which our daily-cap accounting relies on.
     is_adset_budget_sharing_enabled: false,
   });
-  const targeting: any = { geo_locations: { countries: spec.countries?.length ? spec.countries : ['US'] } };
-  if (spec.ageMin) targeting.age_min = spec.ageMin;
-  if (spec.ageMax) targeting.age_max = spec.ageMax;
-  if (spec.interests?.length) targeting.flexible_spec = [{ interests: spec.interests.map((i) => ({ name: i })) }];
-  const adset = await gpost(`/${act}/adsets`, token, {
-    name: `${spec.name} — ad set`, campaign_id: campaign.id, status: 'PAUSED',
-    daily_budget: String(spec.dailyBudgetCents), billing_event: 'IMPRESSIONS',
-    optimization_goal: 'LINK_CLICKS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', targeting,
-  });
-  const creative = await gpost(`/${act}/adcreatives`, token, {
-    name: `${spec.name} — creative`,
-    object_story_spec: {
-      page_id: pageId,
-      link_data: {
-        message: spec.message, link: spec.link, name: spec.headline,
-        description: spec.description || '', picture: spec.imageUrl || undefined,
-        call_to_action: { type: spec.cta || 'LEARN_MORE', value: { link: spec.link } },
+  try {
+    const targeting: any = { geo_locations: { countries: spec.countries?.length ? spec.countries : ['US'] } };
+    if (spec.ageMin) targeting.age_min = spec.ageMin;
+    if (spec.ageMax) targeting.age_max = spec.ageMax;
+    if (spec.interests?.length) targeting.flexible_spec = [{ interests: spec.interests.map((i) => ({ name: i })) }];
+    const adset = await gpost(`/${act}/adsets`, token, {
+      name: `${spec.name} — ad set`, campaign_id: campaign.id, status: 'PAUSED',
+      daily_budget: String(spec.dailyBudgetCents), billing_event: 'IMPRESSIONS',
+      optimization_goal: 'LINK_CLICKS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', targeting,
+    });
+    const creative = await gpost(`/${act}/adcreatives`, token, {
+      name: `${spec.name} — creative`,
+      object_story_spec: {
+        page_id: pageId,
+        link_data: {
+          message: spec.message, link: spec.link, name: spec.headline,
+          description: spec.description || '', picture: spec.imageUrl || undefined,
+          call_to_action: { type: spec.cta || 'LEARN_MORE', value: { link: spec.link } },
+        },
       },
-    },
-  });
-  const ad = await gpost(`/${act}/ads`, token, {
-    name: `${spec.name} — ad`, adset_id: adset.id, creative: { creative_id: creative.id }, status: 'PAUSED',
-  });
-  return { campaignId: campaign.id, adsetId: adset.id, creativeId: creative.id, adId: ad.id };
+    });
+    const ad = await gpost(`/${act}/ads`, token, {
+      name: `${spec.name} — ad`, adset_id: adset.id, creative: { creative_id: creative.id }, status: 'PAUSED',
+    });
+    return { campaignId: campaign.id, adsetId: adset.id, creativeId: creative.id, adId: ad.id };
+  } catch (e) {
+    await gdelete(campaign.id, token); // remove the orphaned paused campaign so retries don't pile up
+    throw e;
+  }
 }
 
 // Flip an entity (campaign/adset/ad) ACTIVE or PAUSED.
