@@ -18,7 +18,7 @@ type EmailList = { id: string; name: string; total?: number; active?: number };
 type Directive = { id: string; text: string; created_at: number };
 type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[]; lists?: EmailList[]; directives?: Directive[] };
 type Auth = { connected: boolean; method: string; detail: string };
-type MetaSel = { accounts: { id: string; name: string }[]; pages: { id: string; name: string }[]; ad_account_id: string; page_id: string; default_image_url: string; handle: string };
+type MetaSel = { accounts: { id: string; name: string }[]; pages: { id: string; name: string }[]; ad_account_id: string; page_id: string; default_image_url: string; default_link: string; handle: string };
 type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean; excluded?: boolean; meta?: MetaSel };
 
 // ----------------------------- helpers --------------------------------------
@@ -1095,6 +1095,7 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
 // Meta Ads: pick which ad account + Page to spend through, and a default ad image.
 function MetaConfig({ meta, onSelect }: { meta: MetaSel; onSelect: (sel: any) => void }) {
   const [img, setImg] = useState(meta.default_image_url || '');
+  const [link, setLink] = useState(meta.default_link || '');
   return (
     <div className="meta-cfg">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -1113,11 +1114,15 @@ function MetaConfig({ meta, onSelect }: { meta: MetaSel; onSelect: (sel: any) =>
           {meta.pages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </label>
+      <label className="meta-field"><span>Default destination URL</span>
+        <input className="field" style={{ marginTop: 0 }} placeholder="https://your-website.com  (a WEBSITE, not an App Store link)" value={link} onChange={(e) => setLink(e.target.value)} />
+        <button className="mini" onClick={() => onSelect({ default_link: link.trim() })}>Save</button>
+      </label>
       <label className="meta-field"><span>Default ad image URL</span>
         <input className="field" style={{ marginTop: 0 }} placeholder="https://…/app-icon.png  (used when an ad has no image)" value={img} onChange={(e) => setImg(e.target.value)} />
         <button className="mini" onClick={() => onSelect({ default_image_url: img.trim() })}>Save</button>
       </label>
-      <div className="note" style={{ fontSize: 11 }}>Every Meta ad needs an image — agents try to find one, and this is the fallback. Use your App Store icon or a hosted brand image.</div>
+      <div className="note" style={{ fontSize: 11 }}>Ads link to the destination URL (use a website landing page — App Store links require Meta's App Installs objective). Every ad needs an image; agents find one, this is the fallback.</div>
     </div>
   );
 }

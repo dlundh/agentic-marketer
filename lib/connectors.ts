@@ -270,8 +270,11 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
         return { status: 'ready', detail: 'Ad campaign prepared. Connect Meta Ads (finish Meta business verification + app review, then pick your ad account & page) to launch it for real.' };
       }
       const m = safeJSON(action.meta) || {};
-      const link = m.link || getProject(action.project_id)?.url || '';
+      const link = m.link || s.default_link || getProject(action.project_id)?.url || '';
       if (!link) return { status: 'ready', detail: 'Ad is ready but has no destination URL — add a link before launching.' };
+      if (/\b(apps\.apple\.com|itunes\.apple\.com|play\.google\.com)\b/i.test(link)) {
+        return { status: 'ready', detail: 'This ad points to an App Store URL — Meta only allows those with the App Installs objective. Set a website "Default ad destination URL" under ⚙ Channels → Meta Ads (e.g. your landing page), then approve.' };
+      }
       const imageUrl = m.image_url || m.picture || s.default_image_url;
       if (!imageUrl) return { status: 'ready', detail: 'Ad needs a creative image. Set a default ad image URL under ⚙ Channels → Meta Ads, or add one to this action, then approve.' };
       const spec = {

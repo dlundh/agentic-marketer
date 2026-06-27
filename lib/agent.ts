@@ -329,7 +329,7 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
     ads: [
       `YOUR ROLE — Paid Advertising (strictly budget-bound):`,
       `Call check_budget first. Design paid experiments for your in-scope channels that fit the remaining budget. If budget is low/zero, first search the web for current free ad credits/coupons (Google Ads, Microsoft Advertising, Meta, etc.) and propose $0 or minimal-cost tests. For each experiment use propose_action kind "ad" with the hook + primary text in \`content\`, audience in \`targeting\`, and a realistic cost_usd (this is the DAILY budget for the ad).`,
-      `EVERY ad MUST include: a short \`headline\`, a destination \`link\` (the product URL), and an \`image_url\` — a PUBLIC image for the creative. Use WebFetch on the product page / App Store listing to find a real image URL (app icon, screenshot, or OG image); Meta ads FAIL to launch without an image. The SUM of your proposed daily ad budgets must stay within the remaining budget.`,
+      `EVERY ad MUST include: a short \`headline\`, a destination \`link\`, and an \`image_url\` — a PUBLIC image for the creative. Use WebFetch on the product page to find a real image URL (app icon, screenshot, or OG image); Meta ads FAIL to launch without an image. For \`link\`, use a WEBSITE landing page — NOT an App Store / Google Play URL (Meta only allows app-store links with its App Installs objective). The SUM of your proposed daily ad budgets must stay within the remaining budget.`,
     ].join('\n'),
     influencer: [
       `YOUR ROLE — Influencer & Creator Outreach:`,

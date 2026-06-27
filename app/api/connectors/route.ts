@@ -20,7 +20,7 @@ export async function GET() {
     // Expose the non-sensitive Meta selection (accounts/pages/choices) for the picker.
     if (ch.key === 'meta_ads' && row?.connected && row.secrets) {
       const s = JSON.parse(row.secrets);
-      base.meta = { accounts: s.accounts || [], pages: s.pages || [], ad_account_id: s.ad_account_id || '', page_id: s.page_id || '', default_image_url: s.default_image_url || '', handle: s.handle || '' };
+      base.meta = { accounts: s.accounts || [], pages: s.pages || [], ad_account_id: s.ad_account_id || '', page_id: s.page_id || '', default_image_url: s.default_image_url || '', default_link: s.default_link || '', handle: s.handle || '' };
     }
     return base;
   });
@@ -61,7 +61,7 @@ export async function POST(req: Request) {
   // Update Meta selection (ad account / page / default ad image) without re-auth.
   if (body.select && key === 'meta_ads') {
     const patch: any = {};
-    for (const f of ['ad_account_id', 'page_id', 'default_image_url'] as const) {
+    for (const f of ['ad_account_id', 'page_id', 'default_image_url', 'default_link'] as const) {
       if (body.select[f] !== undefined) patch[f] = String(body.select[f]);
     }
     updateConnectorSecrets('meta_ads', patch);
