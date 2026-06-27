@@ -12,8 +12,8 @@ type Activity = { id: string; kind: string; label: string | null; content: strin
 type Finding = { id: string; category: string | null; title: string; summary: string | null; details: string | null; job_id: string | null };
 type FileRow = { id: string; name: string; mime: string; size: number; kind: string | null; job_id: string | null };
 type Project = { id: string; title: string; prompt: string; url: string | null; phase: string; status: string; summary: string | null; updated_at: number; jobs?: Job[] };
-type Campaign = { id: string; status: string; currency: string; budget_cents: number; spent_cents: number; daily_cap_cents: number; channels: string | null; autonomy: string; strategy: string | null };
-type ActionItem = { id: string; channel: string; kind: string; title: string; summary: string | null; content: string | null; meta: string | null; cost_cents: number; status: string; result: string | null; job_id: string | null; auto?: boolean };
+type Campaign = { id: string; status: string; currency: string; budget_cents: number; spent_cents: number; daily_cap_cents: number; channels: string | null; autonomy: string; auto_posts: number; strategy: string | null };
+type ActionItem = { id: string; channel: string; kind: string; title: string; summary: string | null; content: string | null; meta: string | null; cost_cents: number; status: string; scheduled_at?: number; result: string | null; job_id: string | null; auto?: boolean };
 type EmailList = { id: string; name: string; total?: number; active?: number };
 type Directive = { id: string; text: string; created_at: number };
 type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[]; lists?: EmailList[]; directives?: Directive[] };
@@ -546,6 +546,12 @@ const CH_LABEL: Record<string, string> = {
 };
 const chLabel = (k: string) => CH_LABEL[k] || k;
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+const fmtWhen = (ms: number) => {
+  const d = new Date(ms);
+  const day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `${day} at ${time}`;
+};
 const metaPaused = (a: ActionItem) => { try { return !!(a.meta && JSON.parse(a.meta).ad_paused); } catch { return false; } };
 
 // Per-channel Make.com recipe: which module + which text field to map.
@@ -615,8 +621,14 @@ function AdControls({ campaign, onCampaignAction, liveAds }: { campaign: Campaig
   const [funds, setFunds] = useState('');
   const [cap, setCap] = useState(((campaign.daily_cap_cents || 0) / 100) ? String((campaign.daily_cap_cents || 0) / 100) : '');
   const paused = campaign.status === 'paused';
+  const fullAuto = campaign.autonomy === 'autonomous' && !!campaign.auto_posts;
   return (
     <div className="adctl">
+      <label className="fullauto-row" title="Smart-schedules & publishes organic posts at the best times per channel, and auto-launches/optimizes/pauses ads — all inside your caps + kill switch.">
+        <input type="checkbox" checked={fullAuto} onChange={(e) => onCampaignAction({ action: 'full_auto', on: e.target.checked })} />
+        <span className="fullauto-label">🤖 Fully automated marketing {fullAuto ? <b className="fa-on">ON</b> : <span className="fa-off">off</span>}</span>
+        <span className="note" style={{ fontSize: 11 }}>Posts publish on a smart per-channel schedule; ads auto-launch & auto-pause on performance. Caps + kill switch still apply.</span>
+      </label>
       <div className="adctl-row">
         <div className="adctl-stat"><span className="lbl">Funded</span><b>{usd(campaign.budget_cents)}</b></div>
         <div className="adctl-stat"><span className="lbl">Spent</span><b>{usd(campaign.spent_cents)}</b></div>
@@ -659,6 +671,7 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
   const allProposed = actions.filter((a) => ['proposed', 'revising'].includes(a.status));
   const proposed = autoOnly ? allProposed.filter((a) => a.auto) : allProposed;
   const hiddenManual = allProposed.length - proposed.length;
+  const scheduled = actions.filter((a) => a.status === 'scheduled').sort((x, y) => (x.scheduled_at || 0) - (y.scheduled_at || 0));
   const live = actions.filter((a) => ['approved', 'done', 'ready', 'sent'].includes(a.status));
   const failed = actions.filter((a) => a.status === 'failed');
   const rejected = actions.filter((a) => a.status === 'rejected');
@@ -684,7 +697,10 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
         {campaign.budget_cents > 0 && <div className="meter"><div className="meter-fill" style={{ width: `${pct}%` }} /></div>}
         <AdControls campaign={campaign} onCampaignAction={onCampaignAction} liveAds={actions.filter((a) => a.kind === 'ad' && a.status === 'done' && !metaPaused(a)).length} />
         <div className="note" style={{ fontSize: 12, marginTop: 8 }}>
-          Posts are approval-gated. Ad spend follows your autonomy mode below, always inside the total + daily caps and the kill switch. {anyExecLive && <span className="spin">⟳</span>} {anyExecLive && 'Agents are working…'}
+          {campaign.auto_posts
+            ? 'Organic posts are smart-scheduled & auto-published per channel. '
+            : 'Posts are approval-gated. '}
+          Ad spend follows your autonomy mode, always inside the total + daily caps and the kill switch. {anyExecLive && <span className="spin">⟳</span>} {anyExecLive && 'Agents are working…'}
         </div>
       </div>
 
@@ -706,6 +722,11 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
               : <a onClick={() => setAutoOnly(true)} style={{ cursor: 'pointer' }}>Hide manual ones</a>}
           </div>
         )}
+
+        {scheduled.length > 0 && (
+          <div className="queue-col-head" style={{ marginTop: 18 }} title="Smart-scheduled — these publish automatically at the listed time">⏱ Scheduled to auto-publish · {scheduled.length}</div>
+        )}
+        {scheduled.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} onAdControl={onAdControl} />)}
 
         {failed.length > 0 && <div className="queue-col-head" style={{ marginTop: 18, color: 'var(--red)' }}>⚠ Failed — needs attention · {failed.length}</div>}
         {failed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} onAdControl={onAdControl} />)}
@@ -756,6 +777,23 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenL
         <span className="caret">{open ? '▾' : '▸'}</span>
       </div>
       {a.summary && <div className="action-sum">{a.summary}</div>}
+
+      {a.status === 'scheduled' && a.scheduled_at ? (
+        <div className="signup-row">
+          <span className="auto-pill on">⏱ auto-publishes {fmtWhen(a.scheduled_at)}</span>
+          <button className="mini" disabled={acting} onClick={async () => { setActing(true); await onDecide(a.id, 'approve', isEmail ? listId : undefined); setActing(false); }}>Publish now</button>
+          <button className="mini" disabled={acting} title="Cancel the schedule and discard" onClick={() => onDecide(a.id, 'reject')}>Cancel</button>
+        </div>
+      ) : null}
+
+      {meta.paused_reason && (
+        <div className="note" style={{ fontSize: 12, color: 'var(--amber, #b8860b)' }}>⏸ {meta.paused_reason}</div>
+      )}
+      {a.kind === 'ad' && a.status === 'done' && meta.perf && !meta.ad_paused && (
+        <div className="note" style={{ fontSize: 11 }}>
+          {usd(meta.perf.spend_cents)} spent · {Number(meta.perf.impressions || 0).toLocaleString()} impressions · {Number(meta.perf.clicks || 0).toLocaleString()} clicks · CTR {((meta.perf.ctr || 0) * 100).toFixed(2)}%
+        </div>
+      )}
 
       {meta.signup_url && (
         <div className="signup-row">

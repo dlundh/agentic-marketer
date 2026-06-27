@@ -96,6 +96,7 @@ function init(): DatabaseSync {
       daily_cap_cents INTEGER NOT NULL DEFAULT 0,         -- max total ad spend per day (0 = none set)
       channels      TEXT,                                 -- JSON array of selected channel keys
       autonomy      TEXT NOT NULL DEFAULT 'approval',     -- approval | auto_after_first | autonomous | optimize_only
+      auto_posts    INTEGER NOT NULL DEFAULT 0,           -- 1 = organic posts are smart-scheduled & auto-published
       strategy      TEXT,
       created_at    INTEGER NOT NULL,
       updated_at    INTEGER NOT NULL
@@ -128,7 +129,8 @@ function init(): DatabaseSync {
       content       TEXT,                                 -- the actual copy / payload (markdown)
       meta          TEXT,                                 -- JSON: targeting, schedule hints, links, rationale
       cost_cents    INTEGER NOT NULL DEFAULT 0,           -- estimated spend if executed
-      status        TEXT NOT NULL DEFAULT 'proposed',     -- proposed | approved | rejected | ready | done | failed
+      status        TEXT NOT NULL DEFAULT 'proposed',     -- proposed | scheduled | approved | rejected | ready | done | failed
+      scheduled_at  INTEGER NOT NULL DEFAULT 0,           -- smart-scheduled publish time (epoch ms); 0 = not scheduled
       result        TEXT,
       created_at    INTEGER NOT NULL,
       updated_at    INTEGER NOT NULL
@@ -185,6 +187,8 @@ function init(): DatabaseSync {
   // Migrations: add columns to DBs created before they existed.
   try { db.exec(`ALTER TABLE connectors ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
   try { db.exec(`ALTER TABLE campaigns ADD COLUMN daily_cap_cents INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
+  try { db.exec(`ALTER TABLE campaigns ADD COLUMN auto_posts INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
+  try { db.exec(`ALTER TABLE actions ADD COLUMN scheduled_at INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
 
   // Migrate connectors from global (PK key) to per-project (PK project_id,key),
   // assigning existing connections to the most-recently-updated project.
@@ -361,7 +365,7 @@ export function changeSignature(): string {
 export type Campaign = {
   id: string; project_id: string; status: string; currency: string;
   budget_cents: number; spent_cents: number; daily_cap_cents: number; channels: string | null;
-  autonomy: string; strategy: string | null; created_at: number; updated_at: number;
+  autonomy: string; auto_posts: number; strategy: string | null; created_at: number; updated_at: number;
 };
 export type Connector = {
   project_id: string; key: string; label: string; executor: string; secrets: string | null;
@@ -371,7 +375,7 @@ export type ActionRow = {
   id: string; project_id: string; campaign_id: string; job_id: string | null;
   channel: string; kind: string; title: string; summary: string | null;
   content: string | null; meta: string | null; cost_cents: number;
-  status: string; result: string | null; created_at: number; updated_at: number;
+  status: string; scheduled_at: number; result: string | null; created_at: number; updated_at: number;
 };
 
 export function createCampaign(c: {
@@ -394,8 +398,8 @@ export const listActiveCampaigns = () =>
 export function updateCampaign(id: string, patch: Partial<Campaign>) {
   const cur = getCampaign(id); if (!cur) return;
   const n = { ...cur, ...patch, updated_at: now() };
-  db.prepare(`UPDATE campaigns SET status=?,budget_cents=?,spent_cents=?,daily_cap_cents=?,channels=?,autonomy=?,strategy=?,updated_at=? WHERE id=?`)
-    .run(n.status, n.budget_cents, n.spent_cents, n.daily_cap_cents, n.channels ?? null, n.autonomy, n.strategy ?? null, n.updated_at, id);
+  db.prepare(`UPDATE campaigns SET status=?,budget_cents=?,spent_cents=?,daily_cap_cents=?,channels=?,autonomy=?,auto_posts=?,strategy=?,updated_at=? WHERE id=?`)
+    .run(n.status, n.budget_cents, n.spent_cents, n.daily_cap_cents, n.channels ?? null, n.autonomy, n.auto_posts ?? 0, n.strategy ?? null, n.updated_at, id);
 }
 // Add funds = raise the total ad-spend ceiling.
 export function addFunds(campaignId: string, cents: number) {
@@ -553,9 +557,16 @@ export const listActions = (campaignId: string) =>
 export function updateAction(id: string, patch: Partial<ActionRow>) {
   const cur = getAction(id); if (!cur) return;
   const n = { ...cur, ...patch, updated_at: now() };
-  db.prepare(`UPDATE actions SET status=?,result=?,title=?,summary=?,content=?,meta=?,cost_cents=?,updated_at=? WHERE id=?`)
-    .run(n.status, n.result ?? null, n.title, n.summary ?? null, n.content ?? null, n.meta ?? null, n.cost_cents, n.updated_at, id);
+  db.prepare(`UPDATE actions SET status=?,scheduled_at=?,result=?,title=?,summary=?,content=?,meta=?,cost_cents=?,updated_at=? WHERE id=?`)
+    .run(n.status, n.scheduled_at ?? 0, n.result ?? null, n.title, n.summary ?? null, n.content ?? null, n.meta ?? null, n.cost_cents, n.updated_at, id);
 }
+// Smart-schedule a proposed organic post for auto-publish at `when` (epoch ms).
+export function scheduleAction(id: string, when: number) {
+  db.prepare(`UPDATE actions SET status='scheduled', scheduled_at=?, updated_at=? WHERE id=?`).run(when, now(), id);
+}
+// Org posts that are due to publish now (scheduled in the past), across all projects.
+export const dueScheduledActions = (byTime: number) =>
+  db.prepare(`SELECT * FROM actions WHERE status='scheduled' AND scheduled_at>0 AND scheduled_at<=? ORDER BY scheduled_at ASC`).all(byTime) as ActionRow[];
 // Recover actions left mid-revision by an interrupted run (e.g. a server restart),
 // and tell the user so it doesn't look like a silent no-op.
 export function resetStaleRevisions(staleMs: number) {

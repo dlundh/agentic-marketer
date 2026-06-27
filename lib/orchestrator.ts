@@ -3,6 +3,7 @@ import {
   listFindings, listAllActiveJobs, createCampaign, getCampaign, getCampaignByProject,
   updateCampaign, getAction, updateAction, reserveSpend, refundSpend, resetStaleRevisions,
   addFunds, removeFunds, setSpend, listActions, getConnector, listActiveCampaigns,
+  scheduleAction, dueScheduledActions,
   type Job, type ActionRow, type Campaign,
 } from './db';
 import { emitEvent } from './events';
@@ -96,6 +97,10 @@ async function drive(job: Job, opts: { resume?: boolean; attachments?: string[] 
     // Ads agent finished proposing -> release eligible ads per autonomy mode.
     if (job.phase === 'execution' && job.kind === 'ads') {
       autoApproveAds(job.project_id);
+    }
+    // Any specialist finished proposing -> smart-schedule new organic posts if full-auto.
+    if (job.phase === 'execution' && job.kind !== 'ads') {
+      scheduleProposedPosts(job.project_id);
     }
   } catch (err: any) {
     running.delete(job.id);
@@ -252,6 +257,14 @@ export function setAutonomy(projectId: string, mode: string) {
   autoApproveAds(projectId); // a more-autonomous mode may release queued ads now
   return true;
 }
+// Full-auto organic posting: smart-schedule + auto-publish proposed posts.
+export function setAutoPosts(projectId: string, on: boolean) {
+  const c = getCampaignByProject(projectId); if (!c) return false;
+  updateCampaign(c.id, { auto_posts: on ? 1 : 0 });
+  if (on) scheduleProposedPosts(projectId); // queue everything already waiting
+  emitEvent({ type: 'project', projectId });
+  return true;
+}
 // Kill switch: pause/resume the whole campaign (and pause live Meta entities).
 export async function setKillSwitch(projectId: string, paused: boolean) {
   const c = getCampaignByProject(projectId); if (!c) return false;
@@ -288,34 +301,182 @@ export async function autoApproveAds(projectId: string) {
   }
 }
 
-// Background poller: every active campaign with live ads gets its real spend
-// synced and is auto-paused if it hits its cap. Runs regardless of the UI being
-// open. Guarded on globalThis so only one interval runs per process.
-const POLL_MS = 10 * 60 * 1000; // every 10 minutes
+// ---------------------------------------------------------------------------
+// Smart organic-post scheduler (full-auto mode).
+//
+// Each channel has rough best-time-to-post windows (local server time), a daily
+// cadence cap, and a minimum gap so the swarm can't spam a feed. Proposed posts
+// are dripped into the next free slots; a background tick publishes due ones via
+// the same approveAction path a human click would take. We never fabricate
+// engagement and never auto-blast email (those need an explicit list).
+// ---------------------------------------------------------------------------
+type PostWindow = { hours: number[]; perDay: number; gapHours: number };
+const DEFAULT_WINDOW: PostWindow = { hours: [9, 13, 17], perDay: 2, gapHours: 4 };
+const POST_WINDOWS: Record<string, PostWindow> = {
+  x:           { hours: [8, 12, 17, 20], perDay: 3, gapHours: 3 },   // higher cadence is normal on X
+  linkedin:    { hours: [8, 12, 17],     perDay: 1, gapHours: 20 },  // 1/day, business hours
+  reddit:      { hours: [9, 14, 19],     perDay: 1, gapHours: 22 },  // sparing — communities punish spam
+  instagram:   { hours: [11, 13, 19],    perDay: 1, gapHours: 18 },
+  threads:     { hours: [9, 12, 18],     perDay: 2, gapHours: 5 },
+  mastodon:    { hours: [9, 13, 18],     perDay: 2, gapHours: 5 },
+  facebook:    { hours: [9, 13, 19],     perDay: 1, gapHours: 18 },
+  tiktok:      { hours: [11, 16, 20],    perDay: 1, gapHours: 18 },
+  youtube:     { hours: [12, 17],        perDay: 1, gapHours: 22 },
+  discord:     { hours: [10, 15, 20],    perDay: 2, gapHours: 4 },
+  blog:        { hours: [10],            perDay: 1, gapHours: 40 },  // long-form, infrequent
+  hackernews:  { hours: [9, 15],         perDay: 1, gapHours: 40 },
+  producthunt: { hours: [9],             perDay: 1, gapHours: 40 },
+  indiehackers:{ hours: [10, 16],        perDay: 1, gapHours: 24 },
+};
+const postWindow = (channel: string) => POST_WINDOWS[channel] || DEFAULT_WINDOW;
+
+// Channels we auto-schedule: organic/community/content only (not paid ads, not
+// email — those are handled elsewhere and need explicit targeting/lists).
+function isAutoPostable(a: ActionRow): boolean {
+  if (a.kind === 'ad') return false;
+  const cat = channelDef(a.channel).category;
+  if (cat !== 'organic' && cat !== 'community' && cat !== 'content') return false;
+  return isAutoExecutable(a); // only schedule what we can actually publish (channel connected)
+}
+
+const startOfDay = (ms: number) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
+
+// Find the next free publish time for `channel` given times already taken on it.
+function nextPostSlot(channel: string, taken: number[]): number {
+  const w = postWindow(channel);
+  const now = Date.now();
+  const sorted = [...taken].sort((a, b) => a - b);
+  for (let day = 0; day < 60; day++) {
+    const base = startOfDay(now) + day * 86400_000;
+    const onDay = sorted.filter((t) => startOfDay(t) === base).length;
+    if (onDay >= w.perDay) continue;                                        // daily cadence cap reached
+    for (const h of w.hours) {
+      const cand = base + h * 3600_000;
+      if (cand <= now + 60_000) continue;                                   // must be in the future
+      if (sorted.some((t) => Math.abs(t - cand) < w.gapHours * 3600_000)) continue; // respect min gap
+      return cand;
+    }
+  }
+  return now + 3600_000; // fallback: an hour out
+}
+
+// Queue every still-proposed organic post for the project into smart slots.
+// No-op unless the campaign is in full-auto posting mode.
+export function scheduleProposedPosts(projectId: string) {
+  const c = getCampaignByProject(projectId);
+  if (!c || c.status !== 'active' || !c.auto_posts) return;
+  const actions = listActions(c.id);
+  // Seed "taken" per channel with already scheduled/published posts.
+  const taken: Record<string, number[]> = {};
+  for (const a of actions) {
+    if (!isAutoPostable(a)) continue;
+    if (a.status === 'scheduled' && a.scheduled_at) (taken[a.channel] ||= []).push(a.scheduled_at);
+    else if (a.status === 'done') (taken[a.channel] ||= []).push(a.updated_at);
+  }
+  let queued = 0;
+  for (const a of actions) {
+    if (a.status !== 'proposed' || !isAutoPostable(a)) continue;
+    const slot = nextPostSlot(a.channel, taken[a.channel] || []);
+    (taken[a.channel] ||= []).push(slot);
+    scheduleAction(a.id, slot);
+    queued++;
+  }
+  if (queued) emitEvent({ type: 'project', projectId });
+}
+
+// Publish any organic posts whose scheduled time has arrived. Re-checks the
+// campaign is still active/full-auto (a kill switch or toggle-off cancels).
+async function publishDuePosts() {
+  for (const a of dueScheduledActions(Date.now())) {
+    const c = getCampaign(a.campaign_id);
+    if (!c || c.status !== 'active' || !c.auto_posts) continue; // paused/kill-switched -> hold
+    try { await approveAction(a.id); } catch { /* leave it; retry next tick */ }
+  }
+}
+
+// Keep a rolling content pipeline: when a full-auto project's upcoming post
+// queue runs low (and no swarm job is mid-flight), spawn the post-producing
+// specialists again so it keeps publishing over time instead of going quiet.
+const MIN_QUEUED_POSTS = 3;
+function refillScheduledPosts(projectId: string) {
+  const c = getCampaignByProject(projectId);
+  if (!c || c.status !== 'active' || !c.auto_posts) return;
+  const actions = listActions(c.id);
+  const queued = actions.filter((a) =>
+    (a.status === 'scheduled' && a.scheduled_at > Date.now()) ||
+    (a.status === 'proposed' && isAutoPostable(a))).length;
+  if (queued >= MIN_QUEUED_POSTS) return;
+  // Don't stack generations: skip if a specialist is already running/queued.
+  if (listJobs(projectId).some((j) => j.phase === 'execution' && (j.status === 'running' || j.status === 'queued'))) return;
+  // Only the post-producing channels (not ads/email) drive organic refills.
+  const postChannels = autoChannels(projectId).filter((k) => ['organic', 'community', 'content'].includes(channelDef(k).category));
+  if (postChannels.length) spawnRoles(projectId, rolesForChannels(postChannels), false);
+}
+
+// Background poller: sync ad spend + cap, schedule new posts, publish due posts,
+// and refill the content pipeline. Runs regardless of the UI being open.
+// Guarded on globalThis so only one interval runs per process.
+const POLL_MS = 5 * 60 * 1000; // every 5 minutes (tighter so scheduled posts publish near their slot)
 async function pollAllCampaigns() {
   for (const c of listActiveCampaigns()) {
+    scheduleProposedPosts(c.project_id); // catch anything not scheduled at job-completion time
+    refillScheduledPosts(c.project_id);  // top up the pipeline when it runs low
     if (listActions(c.id).some((a) => a.kind === 'ad' && a.status === 'done')) {
       try { await runAdOptimizer(c.project_id); } catch { /* keep polling others */ }
     }
   }
+  await publishDuePosts();
 }
 {
   const gp = globalThis as any;
   if (!gp.__adPoll) gp.__adPoll = setInterval(() => { pollAllCampaigns().catch(() => {}); }, POLL_MS);
 }
 
-// Pull real spend from Meta, update the ledger, and auto-pause if the total cap
-// is hit. Safe to call on a schedule.
+// Performance thresholds for auto-pausing a losing ad. Conservative: an ad gets
+// a fair test (min spend + min impressions) before judgement, so we don't kill
+// it on noise. Tunable in one place.
+const AD_MIN_SPEND_CENTS = 500;     // don't judge an ad under ~$5 of spend
+const AD_MIN_IMPRESSIONS = 800;     // …or under this much reach
+const AD_CTR_FLOOR = 0.004;         // < 0.4% click-through = underperforming
+const AD_DEAD_SPEND_CENTS = 1500;   // ≥ $15 spent with zero clicks = dead, pause regardless
+
+// Pull real spend + per-ad performance from Meta, update the ledger, hard-stop
+// at the cap, and (unless in manual 'approval' mode) auto-pause ads that have
+// had a fair test but are clearly underperforming. Safe to call on a schedule.
 export async function runAdOptimizer(projectId: string) {
   const c = getCampaignByProject(projectId); if (!c) return;
   const meta = getConnector(projectId, 'meta_ads');
   const s = meta?.connected && meta.secrets ? JSON.parse(meta.secrets) : null;
   if (s?.access_token) {
     const { campaignInsights } = await import('./meta');
+    const optimize = c.autonomy !== 'approval'; // manual mode still gets cap-safety, just no auto-pause
     let total = 0;
     for (const a of listActions(c.id).filter((x) => x.kind === 'ad' && x.status === 'done')) {
-      const ids = (a.meta ? JSON.parse(a.meta) : {}).meta_ids;
-      if (ids?.campaignId) { try { total += (await campaignInsights(s.access_token, ids.campaignId)).spendCents; } catch { /* ignore */ } }
+      const m = a.meta ? JSON.parse(a.meta) : {};
+      const ids = m.meta_ids;
+      if (!ids?.campaignId) continue;
+      let ins;
+      try { ins = await campaignInsights(s.access_token, ids.campaignId); } catch { continue; }
+      total += ins.spendCents;
+      if (m.ad_paused) continue; // already off — counted for spend, skip judgement
+      // Evaluate this ad. CTR = clicks / impressions.
+      const ctr = ins.impressions > 0 ? ins.clicks / ins.impressions : 0;
+      const dead = ins.spendCents >= AD_DEAD_SPEND_CENTS && ins.clicks === 0;
+      const weak = ins.spendCents >= AD_MIN_SPEND_CENTS && ins.impressions >= AD_MIN_IMPRESSIONS && ctr < AD_CTR_FLOOR;
+      if (optimize && (dead || weak)) {
+        const why = dead
+          ? `Auto-paused: spent $${(ins.spendCents / 100).toFixed(2)} with 0 clicks.`
+          : `Auto-paused: CTR ${(ctr * 100).toFixed(2)}% below ${(AD_CTR_FLOOR * 100).toFixed(1)}% floor after ${ins.impressions.toLocaleString()} impressions ($${(ins.spendCents / 100).toFixed(2)} spent).`;
+        try {
+          const { setMetaStatus } = await import('./meta');
+          await setMetaStatus(s.access_token, ids.campaignId, 'PAUSED');
+          updateAction(a.id, { meta: JSON.stringify({ ...m, ad_paused: true, paused_reason: why }), result: why });
+        } catch { /* try again next cycle */ }
+      } else {
+        // Keep a fresh performance snapshot on the action for the UI.
+        const perf = { spend_cents: ins.spendCents, impressions: ins.impressions, clicks: ins.clicks, ctr };
+        if (JSON.stringify(m.perf) !== JSON.stringify(perf)) updateAction(a.id, { meta: JSON.stringify({ ...m, perf }) });
+      }
     }
     setSpend(c.id, total);
     if (c.budget_cents > 0 && total >= c.budget_cents) await setKillSwitch(projectId, true); // hard stop at the cap
@@ -337,7 +498,7 @@ export function launchOptimizer(projectId: string) {
 // best connected channel. Returns an error string if it would bust the budget.
 export async function approveAction(actionId: string, opts: { list_id?: string } = {}): Promise<{ ok: boolean; error?: string; status?: string; detail?: string }> {
   let a = getAction(actionId);
-  if (!a || !['proposed', 'failed'].includes(a.status)) return { ok: false, error: 'Action is not awaiting approval.' };
+  if (!a || !['proposed', 'scheduled', 'failed'].includes(a.status)) return { ok: false, error: 'Action is not awaiting approval.' };
   // Attach the chosen email list before sending.
   if (opts.list_id) {
     const meta = a.meta ? JSON.parse(a.meta) : {};
@@ -483,7 +644,7 @@ export function reviseAction(actionId: string, feedback: string): boolean {
 
 export function rejectAction(actionId: string): boolean {
   const a = getAction(actionId);
-  if (!a || !['proposed', 'approved', 'ready', 'failed'].includes(a.status)) return false;
+  if (!a || !['proposed', 'scheduled', 'approved', 'ready', 'failed'].includes(a.status)) return false;
   if (a.status === 'approved' && a.cost_cents > 0) refundSpend(a.campaign_id, a.cost_cents);
   updateAction(actionId, { status: 'rejected' });
   emitEvent({ type: 'finding', projectId: a.project_id });

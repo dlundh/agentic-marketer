@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   launchCampaign, launchOptimizer, generateActions,
-  addCampaignFunds, removeCampaignFunds, setDailyCap, setAutonomy, setKillSwitch, runAdOptimizer,
+  addCampaignFunds, removeCampaignFunds, setDailyCap, setAutonomy, setKillSwitch, runAdOptimizer, setAutoPosts,
 } from '@/lib/orchestrator';
 
 export const runtime = 'nodejs';
@@ -21,6 +21,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     case 'remove_funds': return NextResponse.json({ ok: removeCampaignFunds(id, usdToCents(body.amount_usd)) });
     case 'daily_cap': return NextResponse.json({ ok: setDailyCap(id, usdToCents(body.amount_usd)) });
     case 'autonomy': return NextResponse.json({ ok: setAutonomy(id, String(body.mode || '')) });
+    case 'auto_posts': return NextResponse.json({ ok: setAutoPosts(id, !!body.on) });
+    case 'full_auto': {
+      // Master "fully automated marketing" switch: posts + ads, both auto.
+      const on = !!body.on;
+      setAutonomy(id, on ? 'autonomous' : 'approval');
+      setAutoPosts(id, on);
+      return NextResponse.json({ ok: true });
+    }
     case 'kill': return NextResponse.json({ ok: await setKillSwitch(id, !!body.paused) });
     case 'optimize_ads': await runAdOptimizer(id); return NextResponse.json({ ok: true });
   }

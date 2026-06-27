@@ -235,6 +235,11 @@ a { color: var(--accent); }
 
 /* Autonomous ad controls */
 .adctl { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.fullauto-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-soft); cursor: pointer; }
+.fullauto-row input { width: 16px; height: 16px; accent-color: var(--accent); }
+.fullauto-label { font-size: 13px; font-weight: 600; }
+.fa-on { color: var(--green); font-size: 11px; letter-spacing: .5px; }
+.fa-off { color: var(--muted); font-size: 11px; letter-spacing: .5px; }
 .adctl-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .adctl-stat { display: flex; flex-direction: column; gap: 1px; }
 .adctl-stat .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
@@ -268,6 +273,7 @@ a { color: var(--accent); }
 .as-approved { background: rgba(107,184,240,.18); color: var(--blue); }
 .as-done { background: rgba(61,220,151,.18); color: var(--green); }
 .as-ready { background: rgba(124,124,240,.18); color: var(--accent); }
+.as-scheduled { background: rgba(107,184,240,.18); color: var(--blue); }
 .as-sent { background: rgba(245,177,76,.18); color: var(--amber); }
 .as-rejected, .as-failed { background: rgba(240,107,107,.16); color: var(--red); }
 .action .cost { font-size: 11px; font-weight: 700; color: var(--amber); background: rgba(245,177,76,.12); padding: 2px 7px; border-radius: 6px; }
