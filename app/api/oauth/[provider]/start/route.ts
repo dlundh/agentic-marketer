@@ -5,6 +5,7 @@ import {
   normalizeInstance, registerMastodonApp, authorizeUrl,
   pkce, xAuthorizeUrl, redditAuthorizeUrl, linkedinAuthorizeUrl,
 } from '@/lib/oauth';
+import { metaAuthorizeUrl } from '@/lib/meta';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -45,6 +46,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ provide
     if (provider === 'linkedin') {
       upsertConnector({ key: 'linkedin', label, executor: 'linkedin', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
       return NextResponse.json({ url: linkedinAuthorizeUrl(client_id, redirectUri, state) });
+    }
+    if (provider === 'meta_ads') {
+      upsertConnector({ key: 'meta_ads', label, executor: 'meta_ads', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
+      return NextResponse.json({ url: metaAuthorizeUrl(client_id, redirectUri, state) });
     }
     return NextResponse.json({ error: 'Unsupported provider.' }, { status: 400 });
   } catch (e: any) {

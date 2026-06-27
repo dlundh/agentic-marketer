@@ -12,7 +12,7 @@ type Activity = { id: string; kind: string; label: string | null; content: strin
 type Finding = { id: string; category: string | null; title: string; summary: string | null; details: string | null; job_id: string | null };
 type FileRow = { id: string; name: string; mime: string; size: number; kind: string | null; job_id: string | null };
 type Project = { id: string; title: string; prompt: string; url: string | null; phase: string; status: string; summary: string | null; updated_at: number; jobs?: Job[] };
-type Campaign = { id: string; status: string; currency: string; budget_cents: number; spent_cents: number; channels: string | null; autonomy: string; strategy: string | null };
+type Campaign = { id: string; status: string; currency: string; budget_cents: number; spent_cents: number; daily_cap_cents: number; channels: string | null; autonomy: string; strategy: string | null };
 type ActionItem = { id: string; channel: string; kind: string; title: string; summary: string | null; content: string | null; meta: string | null; cost_cents: number; status: string; result: string | null; job_id: string | null; auto?: boolean };
 type EmailList = { id: string; name: string; total?: number; active?: number };
 type Directive = { id: string; text: string; created_at: number };
@@ -49,7 +49,7 @@ export default function Page() {
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     const provider = q.get('oauth'); const status = q.get('status');
-    const label = ({ mastodon: 'Mastodon', x: 'X / Twitter', reddit: 'Reddit' } as any)[provider || ''] || provider;
+    const label = ({ mastodon: 'Mastodon', x: 'X / Twitter', reddit: 'Reddit', linkedin: 'LinkedIn', meta_ads: 'Meta Ads' } as any)[provider || ''] || provider;
     if (provider === null) return;
     if (status === 'connected') { setNotice(`✅ ${label} connected — approved ${label} posts will now publish to your account automatically.`); setShowChannels(true); }
     else setError(`${label} connection failed or was cancelled. Please try again.`);
@@ -179,6 +179,14 @@ export default function Page() {
     loadDetail(currentId);
   };
 
+  const campaignAction = async (body: any) => {
+    if (!currentId) return;
+    await fetch(`/api/projects/${currentId}/campaign`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    loadDetail(currentId);
+  };
+
   const createAccount = async (channel: string): Promise<string | null> => {
     if (!currentId) return 'Open a project first.';
     const res = await fetch(`/api/projects/${currentId}/account`, {
@@ -243,6 +251,7 @@ export default function Page() {
                 onGenerate={generate}
                 onOpenChannels={() => setShowChannels(true)}
                 onOpenLists={() => setShowLists(true)}
+                onCampaignAction={campaignAction}
                 lists={detail.lists || []}
                 anyExecLive={detail.jobs.some((j) => j.phase === 'execution' && j.live)}
               />
@@ -587,10 +596,50 @@ function linkify(text: string) {
   );
 }
 
-function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGenerate, onOpenChannels, onOpenLists, lists, anyExecLive }: {
+// Autonomous ad-spend controls: ledger, add funds, daily cap, autonomy, kill switch.
+const AUTONOMY_LABELS: Record<string, string> = {
+  approval: 'Approve every ad', auto_after_first: 'Approve 1st, then auto', autonomous: 'Fully autonomous', optimize_only: 'Auto-optimize only',
+};
+function AdControls({ campaign, onCampaignAction, liveAds }: { campaign: Campaign; onCampaignAction: (b: any) => void; liveAds: number }) {
+  const [funds, setFunds] = useState('');
+  const [cap, setCap] = useState(((campaign.daily_cap_cents || 0) / 100) ? String((campaign.daily_cap_cents || 0) / 100) : '');
+  const paused = campaign.status === 'paused';
+  return (
+    <div className="adctl">
+      <div className="adctl-row">
+        <div className="adctl-stat"><span className="lbl">Funded</span><b>{usd(campaign.budget_cents)}</b></div>
+        <div className="adctl-stat"><span className="lbl">Spent</span><b>{usd(campaign.spent_cents)}</b></div>
+        <div className="adctl-stat"><span className="lbl">Remaining</span><b className="rem">{usd(Math.max(0, campaign.budget_cents - campaign.spent_cents))}</b></div>
+        <div className="adctl-stat"><span className="lbl">Live ads</span><b>{liveAds}</b></div>
+        <button className={`kill ${paused ? 'on' : ''}`} title="Pause/resume all ad spend immediately" onClick={() => onCampaignAction({ action: 'kill', paused: !paused })}>
+          {paused ? '▶ Resume ads' : '⏹ Kill switch'}
+        </button>
+      </div>
+      <div className="adctl-row">
+        <label className="adctl-field"><span>＋ Add funds $</span>
+          <input className="mini-input" type="number" min="0" value={funds} onChange={(e) => setFunds(e.target.value)} placeholder="100" />
+          <button className="mini" disabled={!Number(funds)} onClick={() => { onCampaignAction({ action: 'add_funds', amount_usd: Number(funds) }); setFunds(''); }}>Add</button>
+        </label>
+        <label className="adctl-field"><span>Daily cap $</span>
+          <input className="mini-input" type="number" min="0" value={cap} onChange={(e) => setCap(e.target.value)} placeholder="none" />
+          <button className="mini" onClick={() => onCampaignAction({ action: 'daily_cap', amount_usd: Number(cap) || 0 })}>Set</button>
+        </label>
+        <label className="adctl-field"><span>Autonomy</span>
+          <select className="list-select" value={campaign.autonomy} onChange={(e) => onCampaignAction({ action: 'autonomy', mode: e.target.value })}>
+            {Object.entries(AUTONOMY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        <button className="mini" title="Pull real spend from Meta & auto-pause if the cap is hit" onClick={() => onCampaignAction({ action: 'optimize_ads' })}>↻ Sync spend</button>
+      </div>
+      {campaign.daily_cap_cents > 0 && <div className="note" style={{ fontSize: 11 }}>Hard rails: total cap {usd(campaign.budget_cents)} · daily cap {usd(campaign.daily_cap_cents)}. At the cap, ads auto-pause.</div>}
+    </div>
+  );
+}
+
+function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGenerate, onOpenChannels, onOpenLists, onCampaignAction, lists, anyExecLive }: {
   campaign: Campaign; actions: ActionItem[]; onDecide: (id: string, a: 'approve' | 'reject', list_id?: string) => void;
   onRevise: (id: string, feedback: string) => void; onOptimize: () => void; onGenerate: () => void;
-  onOpenChannels: () => void; onOpenLists: () => void; lists: EmailList[]; anyExecLive: boolean;
+  onOpenChannels: () => void; onOpenLists: () => void; onCampaignAction: (body: any) => void; lists: EmailList[]; anyExecLive: boolean;
 }) {
   const [autoOnly, setAutoOnly] = useState(true);
   const [showLive, setShowLive] = useState(false);
@@ -620,8 +669,9 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
           </div>
         </div>
         {campaign.budget_cents > 0 && <div className="meter"><div className="meter-fill" style={{ width: `${pct}%` }} /></div>}
+        <AdControls campaign={campaign} onCampaignAction={onCampaignAction} liveAds={actions.filter((a) => a.kind === 'ad' && a.status === 'done').length} />
         <div className="note" style={{ fontSize: 12, marginTop: 8 }}>
-          Approval-gated — nothing is published or spent until you approve it. {anyExecLive && <span className="spin">⟳</span>} {anyExecLive && 'Agents are proposing actions…'}
+          Posts are approval-gated. Ad spend follows your autonomy mode below, always inside the total + daily caps and the kill switch. {anyExecLive && <span className="spin">⟳</span>} {anyExecLive && 'Agents are working…'}
         </div>
       </div>
 
@@ -1052,10 +1102,11 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
   const [cid, setCid] = useState('');
   const [csec, setCsec] = useState('');
   const [webhookMode, setWebhookMode] = useState(false);
-  const isOAuth = ['mastodon', 'x', 'reddit', 'linkedin'].includes(c.key);
+  const isOAuth = ['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads'].includes(c.key);
   const redirectUri = (typeof window !== 'undefined' ? window.location.origin : '') + `/api/oauth/${c.key}/callback`;
   const portal = c.key === 'x' ? 'https://developer.twitter.com/en/portal/dashboard'
     : c.key === 'linkedin' ? 'https://www.linkedin.com/developers/apps'
+    : c.key === 'meta_ads' ? 'https://developers.facebook.com/apps'
     : 'https://www.reddit.com/prefs/apps';
 
   const startOAuth = async (payload: any) => {
@@ -1129,6 +1180,7 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
               <a className="note" style={{ fontSize: 11.5 }} href={portal} target="_blank" rel="noreferrer">
                 {c.key === 'x' ? 'Open X developer portal ↗ — create an app, enable OAuth 2.0 (Web App / confidential), scopes incl. tweet.write'
                   : c.key === 'linkedin' ? 'Open LinkedIn developer portal ↗ — create an app, add the “Sign In with LinkedIn using OpenID Connect” + “Share on LinkedIn” products, set the redirect URL above, then copy the Client ID/Secret from the Auth tab'
+                  : c.key === 'meta_ads' ? 'Open Meta for Developers ↗ — create a Business app, add Marketing API + Facebook Login, set this redirect as a valid OAuth URI, then paste App ID/Secret. NOTE: real spend needs Business Verification + App Review for ads_management (Advanced access) + an ad account with billing.'
                   : 'Open Reddit apps ↗ — create a "web app", set the redirect URI above'}
               </a>
               <input className="field" placeholder="Client ID" value={cid} onChange={(e) => setCid(e.target.value)} />

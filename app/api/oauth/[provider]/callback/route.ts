@@ -6,6 +6,7 @@ import {
   exchangeRedditCode, verifyRedditAccount,
   exchangeLinkedinCode, verifyLinkedinAccount,
 } from '@/lib/oauth';
+import { exchangeMetaCode, listAdAccounts, listPages } from '@/lib/meta';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -48,6 +49,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ provider
       const token = await exchangeLinkedinCode(s.client_id, s.client_secret, code, s.redirect_uri);
       const acct = await verifyLinkedinAccount(token);
       upsertConnector({ key: 'linkedin', label, executor: 'linkedin', connected: true, secrets: { client_id: s.client_id, client_secret: s.client_secret, access_token: token, author: `urn:li:person:${acct.sub}`, handle: acct.name } });
+      return back('connected');
+    }
+    if (provider === 'meta_ads') {
+      const token = await exchangeMetaCode(s.client_id, s.client_secret, code, s.redirect_uri);
+      const accounts = await listAdAccounts(token).catch(() => []);
+      const pages = await listPages(token).catch(() => []);
+      upsertConnector({ key: 'meta_ads', label, executor: 'meta_ads', connected: true, secrets: {
+        client_id: s.client_id, client_secret: s.client_secret, access_token: token,
+        ad_account_id: accounts[0]?.id || '', page_id: pages[0]?.id || '',
+        accounts, pages, handle: accounts[0]?.name || 'Meta ad account',
+      } });
       return back('connected');
     }
     return back('error');

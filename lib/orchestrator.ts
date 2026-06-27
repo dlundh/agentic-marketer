@@ -2,7 +2,8 @@ import {
   createProject, createJob, updateJob, getJob, getProject, updateProject, listJobs,
   listFindings, listAllActiveJobs, createCampaign, getCampaign, getCampaignByProject,
   updateCampaign, getAction, updateAction, reserveSpend, refundSpend, resetStaleRevisions,
-  type Job, type ActionRow,
+  addFunds, setSpend, listActions, getConnector,
+  type Job, type ActionRow, type Campaign,
 } from './db';
 import { emitEvent } from './events';
 import { runAgent, runRevision, runAccountKit, ROLE_LABELS } from './agent';
@@ -92,6 +93,10 @@ async function drive(job: Job, opts: { resume?: boolean; attachments?: string[] 
     if (job.phase === 'execution' && job.kind === 'strategist') {
       spawnSpecialists(job.project_id);
     }
+    // Ads agent finished proposing -> release eligible ads per autonomy mode.
+    if (job.phase === 'execution' && job.kind === 'ads') {
+      autoApproveAds(job.project_id);
+    }
   } catch (err: any) {
     running.delete(job.id);
     if (abort.signal.aborted) {
@@ -166,12 +171,13 @@ function rolesForChannels(channelKeys: string[]): string[] {
   return [...roles];
 }
 
-export function launchCampaign(projectId: string, opts: { budget_cents: number; channels: string[]; autonomy?: string }) {
+export function launchCampaign(projectId: string, opts: { budget_cents: number; channels: string[]; autonomy?: string; daily_cap_cents?: number }) {
   const project = getProject(projectId);
   if (!project) return null;
   const campaign = createCampaign({
     project_id: projectId, budget_cents: Math.max(0, opts.budget_cents),
     channels: opts.channels, autonomy: opts.autonomy ?? 'approval',
+    daily_cap_cents: Math.max(0, opts.daily_cap_cents ?? 0),
   });
   updateProject(projectId, { phase: 'execution', status: 'active' });
   emitEvent({ type: 'project', projectId });
@@ -224,6 +230,79 @@ export function createAccountKit(projectId: string, channel: string): { ok: bool
   return { ok: true };
 }
 
+// --- autonomous ad budget controls -----------------------------------------
+
+export function addCampaignFunds(projectId: string, cents: number) {
+  const c = getCampaignByProject(projectId); if (!c) return false;
+  addFunds(c.id, cents); emitEvent({ type: 'project', projectId }); return true;
+}
+export function setDailyCap(projectId: string, cents: number) {
+  const c = getCampaignByProject(projectId); if (!c) return false;
+  updateCampaign(c.id, { daily_cap_cents: Math.max(0, cents) }); emitEvent({ type: 'project', projectId }); return true;
+}
+export function setAutonomy(projectId: string, mode: string) {
+  const c = getCampaignByProject(projectId); if (!c) return false;
+  const ok = ['approval', 'auto_after_first', 'autonomous', 'optimize_only'].includes(mode);
+  if (!ok) return false;
+  updateCampaign(c.id, { autonomy: mode }); emitEvent({ type: 'project', projectId });
+  autoApproveAds(projectId); // a more-autonomous mode may release queued ads now
+  return true;
+}
+// Kill switch: pause/resume the whole campaign (and pause live Meta entities).
+export async function setKillSwitch(projectId: string, paused: boolean) {
+  const c = getCampaignByProject(projectId); if (!c) return false;
+  updateCampaign(c.id, { status: paused ? 'paused' : 'active' });
+  if (paused) await pauseLiveMetaAds(c.id);  // stop real spend immediately
+  emitEvent({ type: 'project', projectId });
+  if (!paused) autoApproveAds(projectId);
+  return true;
+}
+
+async function pauseLiveMetaAds(campaignId: string) {
+  const meta = getConnector('meta_ads');
+  const s = meta?.connected && meta.secrets ? JSON.parse(meta.secrets) : null;
+  if (!s?.access_token) return;
+  const { setMetaStatus } = await import('./meta');
+  for (const a of listActions(campaignId).filter((x) => x.kind === 'ad' && x.status === 'done')) {
+    const ids = (a.meta ? JSON.parse(a.meta) : {}).meta_ids;
+    if (ids?.campaignId) { try { await setMetaStatus(s.access_token, ids.campaignId, 'PAUSED'); } catch { /* best effort */ } }
+  }
+}
+
+// Auto-approve queued ad actions per the campaign's autonomy mode + caps. The
+// first ad always needs a human OK in 'auto_after_first'.
+export async function autoApproveAds(projectId: string) {
+  const c = getCampaignByProject(projectId);
+  if (!c || c.status !== 'active' || c.autonomy === 'approval' || c.autonomy === 'optimize_only') return;
+  const actions = listActions(c.id);
+  let anyAdLive = actions.some((a) => a.kind === 'ad' && a.status === 'done');
+  for (const a of actions) {
+    if (a.kind !== 'ad' || a.status !== 'proposed') continue;
+    if (c.autonomy === 'auto_after_first' && !anyAdLive) continue; // first stays manual
+    const res = await approveAction(a.id);
+    if (res.ok) anyAdLive = true; // unlock the rest once one is live
+  }
+}
+
+// Pull real spend from Meta, update the ledger, and auto-pause if the total cap
+// is hit. Safe to call on a schedule.
+export async function runAdOptimizer(projectId: string) {
+  const c = getCampaignByProject(projectId); if (!c) return;
+  const meta = getConnector('meta_ads');
+  const s = meta?.connected && meta.secrets ? JSON.parse(meta.secrets) : null;
+  if (s?.access_token) {
+    const { campaignInsights } = await import('./meta');
+    let total = 0;
+    for (const a of listActions(c.id).filter((x) => x.kind === 'ad' && x.status === 'done')) {
+      const ids = (a.meta ? JSON.parse(a.meta) : {}).meta_ids;
+      if (ids?.campaignId) { try { total += (await campaignInsights(s.access_token, ids.campaignId)).spendCents; } catch { /* ignore */ } }
+    }
+    setSpend(c.id, total);
+    if (c.budget_cents > 0 && total >= c.budget_cents) await setKillSwitch(projectId, true); // hard stop at the cap
+  }
+  emitEvent({ type: 'project', projectId });
+}
+
 // Spin up the optimizer on demand (after some actions exist / have run).
 export function launchOptimizer(projectId: string) {
   const campaign = getCampaignByProject(projectId);
@@ -269,8 +348,13 @@ export async function approveAction(actionId: string, opts: { list_id?: string }
     emitEvent({ type: 'finding', projectId: a.project_id });
     return { ok: false, error: msg };
   }
-  if (a.cost_cents > 0 && !reserveSpend(a.campaign_id, a.cost_cents)) {
-    const c = getCampaign(a.campaign_id);
+  const c = getCampaign(a.campaign_id);
+  if (a.kind === 'ad') {
+    // Ad spend: enforce kill switch + total cap + daily cap (no reserve — spend
+    // accrues from platform insights over time).
+    const block = adSpendBlock(c, a.cost_cents);
+    if (block) { updateAction(actionId, { result: block }); emitEvent({ type: 'finding', projectId: a.project_id }); return { ok: false, error: block }; }
+  } else if (a.cost_cents > 0 && !reserveSpend(a.campaign_id, a.cost_cents)) {
     const remaining = c ? (c.budget_cents - c.spent_cents) / 100 : 0;
     const msg = `Blocked: $${(a.cost_cents / 100).toFixed(2)} exceeds the remaining budget of $${remaining.toFixed(2)}.`;
     updateAction(actionId, { result: msg });
@@ -281,10 +365,30 @@ export async function approveAction(actionId: string, opts: { list_id?: string }
   emitEvent({ type: 'finding', projectId: a.project_id });
   // Await execution so the caller gets real success/failure feedback (+ the link).
   const res = await runAction(getAction(actionId)!);
-  if (res.status === 'failed' && a.cost_cents > 0) refundSpend(a.campaign_id, a.cost_cents);
-  updateAction(actionId, { status: res.status, result: res.detail });
+  if (res.status === 'failed' && a.kind !== 'ad' && a.cost_cents > 0) refundSpend(a.campaign_id, a.cost_cents);
+  const patch: any = { status: res.status, result: res.detail };
+  if (res.store) { const meta = a.meta ? JSON.parse(a.meta) : {}; patch.meta = JSON.stringify({ ...meta, ...res.store }); }
+  updateAction(actionId, patch);
   emitEvent({ type: 'finding', projectId: a.project_id });
   return { ok: true, status: res.status, detail: res.detail };
+}
+
+// Sum of the daily budgets of currently-live ad actions (their ad sets).
+export function committedDailyCents(campaignId: string): number {
+  return listActions(campaignId).filter((x) => x.kind === 'ad' && x.status === 'done').reduce((s, x) => s + x.cost_cents, 0);
+}
+// Returns a block reason if this ad spend isn't allowed, else ''.
+function adSpendBlock(c: Campaign | undefined, dailyCents: number): string {
+  if (!c) return 'No campaign.';
+  if (c.status === 'paused') return 'Campaign is paused (kill switch on). Resume it to launch ads.';
+  if (c.budget_cents > 0 && c.spent_cents >= c.budget_cents) return 'Total ad budget reached. Add funds to launch more.';
+  if (c.daily_cap_cents > 0) {
+    const committed = committedDailyCents(c.id);
+    if (committed + dailyCents > c.daily_cap_cents) {
+      return `Daily cap $${(c.daily_cap_cents / 100).toFixed(2)} would be exceeded ($${(committed / 100).toFixed(2)} already committed + $${(dailyCents / 100).toFixed(2)}). Raise the daily cap or pause a live ad.`;
+    }
+  }
+  return '';
 }
 
 // Take user feedback on a proposed action, revise its content with an agent,

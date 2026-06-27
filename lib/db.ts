@@ -91,10 +91,11 @@ function init(): DatabaseSync {
       project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       status        TEXT NOT NULL DEFAULT 'active',       -- active | paused | done
       currency      TEXT NOT NULL DEFAULT 'USD',
-      budget_cents  INTEGER NOT NULL DEFAULT 0,           -- hard ceiling (0 = pure organic)
-      spent_cents   INTEGER NOT NULL DEFAULT 0,           -- committed + executed spend
+      budget_cents  INTEGER NOT NULL DEFAULT 0,           -- total lifetime ad-spend ceiling
+      spent_cents   INTEGER NOT NULL DEFAULT 0,           -- actual spend to date (from platform insights)
+      daily_cap_cents INTEGER NOT NULL DEFAULT 0,         -- max total ad spend per day (0 = none set)
       channels      TEXT,                                 -- JSON array of selected channel keys
-      autonomy      TEXT NOT NULL DEFAULT 'approval',     -- approval | autonomous
+      autonomy      TEXT NOT NULL DEFAULT 'approval',     -- approval | auto_after_first | autonomous | optimize_only
       strategy      TEXT,
       created_at    INTEGER NOT NULL,
       updated_at    INTEGER NOT NULL
@@ -178,8 +179,9 @@ function init(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_directives_proj ON directives(project_id);
   `);
 
-  // Migration: add connectors.excluded to DBs created before this column existed.
+  // Migrations: add columns to DBs created before they existed.
   try { db.exec(`ALTER TABLE connectors ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
+  try { db.exec(`ALTER TABLE campaigns ADD COLUMN daily_cap_cents INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
 
   // NB: recovery of interrupted jobs is handled by orchestrator.reconcile(),
   // which is guarded by the live in-memory run registry so it can never flip a
@@ -342,7 +344,7 @@ export function changeSignature(): string {
 
 export type Campaign = {
   id: string; project_id: string; status: string; currency: string;
-  budget_cents: number; spent_cents: number; channels: string | null;
+  budget_cents: number; spent_cents: number; daily_cap_cents: number; channels: string | null;
   autonomy: string; strategy: string | null; created_at: number; updated_at: number;
 };
 export type Connector = {
@@ -357,13 +359,13 @@ export type ActionRow = {
 };
 
 export function createCampaign(c: {
-  project_id: string; budget_cents: number; currency?: string; channels: string[]; autonomy?: string;
+  project_id: string; budget_cents: number; currency?: string; channels: string[]; autonomy?: string; daily_cap_cents?: number;
 }): Campaign {
   const id = uid('c_'); const t = now();
   db.prepare(
-    `INSERT INTO campaigns (id,project_id,status,currency,budget_cents,spent_cents,channels,autonomy,created_at,updated_at)
-     VALUES (?,?, 'active', ?, ?, 0, ?, ?, ?,?)`
-  ).run(id, c.project_id, c.currency ?? 'USD', c.budget_cents, JSON.stringify(c.channels),
+    `INSERT INTO campaigns (id,project_id,status,currency,budget_cents,spent_cents,daily_cap_cents,channels,autonomy,created_at,updated_at)
+     VALUES (?,?, 'active', ?, ?, 0, ?, ?, ?, ?,?)`
+  ).run(id, c.project_id, c.currency ?? 'USD', c.budget_cents, c.daily_cap_cents ?? 0, JSON.stringify(c.channels),
         c.autonomy ?? 'approval', t, t);
   return getCampaign(id)!;
 }
@@ -374,8 +376,17 @@ export const getCampaignByProject = (projectId: string) =>
 export function updateCampaign(id: string, patch: Partial<Campaign>) {
   const cur = getCampaign(id); if (!cur) return;
   const n = { ...cur, ...patch, updated_at: now() };
-  db.prepare(`UPDATE campaigns SET status=?,budget_cents=?,spent_cents=?,channels=?,autonomy=?,strategy=?,updated_at=? WHERE id=?`)
-    .run(n.status, n.budget_cents, n.spent_cents, n.channels ?? null, n.autonomy, n.strategy ?? null, n.updated_at, id);
+  db.prepare(`UPDATE campaigns SET status=?,budget_cents=?,spent_cents=?,daily_cap_cents=?,channels=?,autonomy=?,strategy=?,updated_at=? WHERE id=?`)
+    .run(n.status, n.budget_cents, n.spent_cents, n.daily_cap_cents, n.channels ?? null, n.autonomy, n.strategy ?? null, n.updated_at, id);
+}
+// Add funds = raise the total ad-spend ceiling.
+export function addFunds(campaignId: string, cents: number) {
+  if (cents <= 0) return;
+  db.prepare(`UPDATE campaigns SET budget_cents=budget_cents+?, updated_at=? WHERE id=?`).run(cents, now(), campaignId);
+}
+// Record actual spend reported by the ad platform (idempotent set, not increment).
+export function setSpend(campaignId: string, cents: number) {
+  db.prepare(`UPDATE campaigns SET spent_cents=?, updated_at=? WHERE id=?`).run(Math.max(0, Math.round(cents)), now(), campaignId);
 }
 // Atomically reserve spend against the hard cap. Returns false if it would bust budget.
 export function reserveSpend(campaignId: string, cents: number): boolean {

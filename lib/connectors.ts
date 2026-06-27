@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
-import { getConnector, upsertConnector, activeRecipients, type ActionRow, type Connector, type Recipient } from './db';
+import { getConnector, upsertConnector, activeRecipients, getProject, type ActionRow, type Connector, type Recipient } from './db';
 import { postMastodon, postX, refreshX, postReddit, refreshReddit, postLinkedin } from './oauth';
+import { launchMetaAd, setMetaStatus } from './meta';
 
 // ---------------------------------------------------------------------------
 // Channel catalog + execution adapters.
@@ -149,7 +150,7 @@ export function autoChannels(): string[] {
     const own = getConnector(ch.key);
     if (own?.excluded) continue; // user opted this channel out of action generation
     const s = own?.connected ? safeJSON(own.secrets) : null;
-    const native = ['mastodon', 'x', 'reddit', 'linkedin'].includes(ch.key) && s?.access_token;
+    const native = ['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads'].includes(ch.key) && s?.access_token;
     const ownHook = !!s?.url;
     const viaWebhook = webhookOn && ch.executor === 'webhook';
     const viaSmtp = smtpOn && ch.executor === 'smtp';
@@ -165,7 +166,7 @@ export function isAutoExecutable(action: ActionRow): boolean {
   const def = channelDef(action.channel);
   const own = getConnector(action.channel);
   const ownSecrets = own?.connected ? safeJSON(own.secrets) : null;
-  if (['mastodon', 'x', 'reddit', 'linkedin'].includes(action.channel) && ownSecrets?.access_token) return true; // native API
+  if (['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads'].includes(action.channel) && ownSecrets?.access_token) return true; // native API
   if (ownSecrets?.url) return true; // per-channel webhook
   const emailish = def.executor === 'smtp' || ['email', 'outreach'].includes(action.kind);
   if (emailish && getConnector('smtp')?.connected) return true; // SMTP
@@ -228,7 +229,7 @@ export async function verifySmtp(secrets: any): Promise<{ ok: boolean; message: 
 }
 
 // Execute an approved action via the best available connected executor.
-export async function runAction(action: ActionRow): Promise<{ status: 'done' | 'ready' | 'failed' | 'sent'; detail: string }> {
+export async function runAction(action: ActionRow): Promise<{ status: 'done' | 'ready' | 'failed' | 'sent'; detail: string; store?: any }> {
   // Account-setup tasks are always a human step — never auto-executed.
   if (action.kind === 'account') {
     const url = safeJSON(action.meta)?.signup_url;
@@ -261,6 +262,30 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
     if (action.channel === 'linkedin' && ownSecrets?.access_token && ownSecrets?.author) {
       const r = await postLinkedin(ownSecrets.access_token, ownSecrets.author, text);
       return { status: 'done', detail: `Posted to LinkedIn${ownSecrets.handle ? ` as ${ownSecrets.handle}` : ''}${r.url ? `: ${r.url}` : ''}` };
+    }
+    // Meta Ads: build + launch a real campaign (created PAUSED, then activated).
+    if (action.channel === 'meta_ads') {
+      const s = ownSecrets;
+      if (!s?.access_token || !s?.ad_account_id || !s?.page_id) {
+        return { status: 'ready', detail: 'Ad campaign prepared. Connect Meta Ads (finish Meta business verification + app review, then pick your ad account & page) to launch it for real.' };
+      }
+      const m = safeJSON(action.meta) || {};
+      const link = m.link || getProject(action.project_id)?.url || '';
+      if (!link) return { status: 'ready', detail: 'Ad is ready but has no destination URL — add a link before launching.' };
+      const spec = {
+        name: action.title.slice(0, 80), objective: m.objective || 'OUTCOME_TRAFFIC',
+        dailyBudgetCents: action.cost_cents || 500,
+        message: action.content || action.summary || '', headline: m.headline || action.title.slice(0, 40),
+        description: m.description || '', link, imageUrl: m.image_url || m.picture, cta: m.cta || 'LEARN_MORE',
+        countries: m.countries, ageMin: m.age_min, ageMax: m.age_max, interests: m.interests,
+      };
+      try {
+        const ids = await launchMetaAd(s.access_token, s.ad_account_id, s.page_id, spec);
+        for (const id of [ids.campaignId, ids.adsetId, ids.adId]) await setMetaStatus(s.access_token, id, 'ACTIVE');
+        return { status: 'done', detail: `Launched on Meta at $${(spec.dailyBudgetCents / 100).toFixed(2)}/day (campaign ${ids.campaignId}).`, store: { meta_ids: ids } };
+      } catch (e: any) {
+        return { status: 'failed', detail: `Meta launch failed: ${String(e?.message || e)}` };
+      }
     }
     if (emailish && smtp?.connected) return await sendEmail(smtp, action) as any;
     // A channel connected with its own posting webhook takes precedence.
