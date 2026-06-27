@@ -12,11 +12,22 @@ const V = 'v23.0';
 const GRAPH = `https://graph.facebook.com/${V}`;
 const SCOPES = 'ads_management,ads_read,business_management,pages_show_list';
 
+// Surface Meta's full error detail — the generic "Invalid parameter" hides the
+// real reason in error_user_msg / error_subcode / fbtrace_id.
+function metaError(path: string, j: any, status: number): Error {
+  const e = j?.error || {};
+  const parts = [e.message || `HTTP ${status}`];
+  if (e.error_user_title && e.error_user_title !== e.message) parts.push(e.error_user_title);
+  if (e.error_user_msg) parts.push(e.error_user_msg);
+  if (e.error_subcode) parts.push(`subcode ${e.error_subcode}`);
+  if (e.fbtrace_id) parts.push(`trace ${e.fbtrace_id}`);
+  return new Error(`Meta ${path}: ${parts.join(' — ')}`);
+}
 async function gget(path: string, params: Record<string, string>) {
   const url = `${GRAPH}${path}?${new URLSearchParams(params).toString()}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
   const j: any = await res.json();
-  if (!res.ok || j.error) throw new Error(`Meta ${path}: ${j.error?.message || res.status}`);
+  if (!res.ok || j.error) throw metaError(path, j, res.status);
   return j;
 }
 async function gpost(path: string, token: string, body: Record<string, any>) {
@@ -25,7 +36,7 @@ async function gpost(path: string, token: string, body: Record<string, any>) {
   form.set('access_token', token);
   const res = await fetch(`${GRAPH}${path}`, { method: 'POST', body: form, signal: AbortSignal.timeout(15000) });
   const j: any = await res.json();
-  if (!res.ok || j.error) throw new Error(`Meta ${path}: ${j.error?.message || res.status}`);
+  if (!res.ok || j.error) throw metaError(path, j, res.status);
   return j;
 }
 
