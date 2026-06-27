@@ -203,14 +203,14 @@ function spawnRoles(projectId: string, roles: string[], skipIfExisting: boolean)
 
 // Initial fan-out after the strategist — scoped to currently-connected channels.
 function spawnSpecialists(projectId: string) {
-  spawnRoles(projectId, rolesForChannels(autoChannels()), true);
+  spawnRoles(projectId, rolesForChannels(autoChannels(projectId)), true);
 }
 
 // On-demand: generate a fresh batch of actions for the currently-connected
 // channels (e.g. after the user connects a new account).
 export function generateActions(projectId: string): { ok: boolean; error?: string; roles?: string[] } {
   if (!getCampaignByProject(projectId)) return { ok: false, error: 'No active campaign.' };
-  const channels = autoChannels();
+  const channels = autoChannels(projectId);
   if (!channels.length) return { ok: false, error: 'Connect a channel under ⚙ Channels first, then generate.' };
   const roles = rolesForChannels(channels);
   spawnRoles(projectId, roles, false);
@@ -256,14 +256,14 @@ export function setAutonomy(projectId: string, mode: string) {
 export async function setKillSwitch(projectId: string, paused: boolean) {
   const c = getCampaignByProject(projectId); if (!c) return false;
   updateCampaign(c.id, { status: paused ? 'paused' : 'active' });
-  if (paused) await pauseLiveMetaAds(c.id);  // stop real spend immediately
+  if (paused) await pauseLiveMetaAds(projectId, c.id);  // stop real spend immediately
   emitEvent({ type: 'project', projectId });
   if (!paused) autoApproveAds(projectId);
   return true;
 }
 
-async function pauseLiveMetaAds(campaignId: string) {
-  const meta = getConnector('meta_ads');
+async function pauseLiveMetaAds(projectId: string, campaignId: string) {
+  const meta = getConnector(projectId, 'meta_ads');
   const s = meta?.connected && meta.secrets ? JSON.parse(meta.secrets) : null;
   if (!s?.access_token) return;
   const { setMetaStatus } = await import('./meta');
@@ -308,7 +308,7 @@ async function pollAllCampaigns() {
 // is hit. Safe to call on a schedule.
 export async function runAdOptimizer(projectId: string) {
   const c = getCampaignByProject(projectId); if (!c) return;
-  const meta = getConnector('meta_ads');
+  const meta = getConnector(projectId, 'meta_ads');
   const s = meta?.connected && meta.secrets ? JSON.parse(meta.secrets) : null;
   if (s?.access_token) {
     const { campaignInsights } = await import('./meta');
@@ -335,7 +335,7 @@ export function launchOptimizer(projectId: string) {
 
 // Approve a proposed action: reserve budget (hard cap), then execute it via the
 // best connected channel. Returns an error string if it would bust the budget.
-export async function approveAction(actionId: string, opts: { list_id?: string } = {}): Promise<{ ok: boolean; error?: string }> {
+export async function approveAction(actionId: string, opts: { list_id?: string } = {}): Promise<{ ok: boolean; error?: string; status?: string; detail?: string }> {
   let a = getAction(actionId);
   if (!a || !['proposed', 'failed'].includes(a.status)) return { ok: false, error: 'Action is not awaiting approval.' };
   // Attach the chosen email list before sending.
@@ -394,7 +394,7 @@ export async function approveAction(actionId: string, opts: { list_id?: string }
 }
 
 const parseMeta = (m: string | null) => { try { return m ? JSON.parse(m) : {}; } catch { return {}; } };
-const metaSecrets = () => { const c = getConnector('meta_ads'); return c?.connected && c.secrets ? JSON.parse(c.secrets) : null; };
+const metaSecrets = (projectId: string) => { const c = getConnector(projectId, 'meta_ads'); return c?.connected && c.secrets ? JSON.parse(c.secrets) : null; };
 
 // Sum of the daily budgets of currently-live (not paused) ad actions.
 export function committedDailyCents(campaignId: string): number {
@@ -407,7 +407,7 @@ export function committedDailyCents(campaignId: string): number {
 export async function pauseAd(actionId: string): Promise<{ ok: boolean; error?: string }> {
   const a = getAction(actionId);
   if (!a || a.kind !== 'ad' || a.status !== 'done') return { ok: false, error: 'Not a live ad.' };
-  const meta = parseMeta(a.meta); const s = metaSecrets();
+  const meta = parseMeta(a.meta); const s = metaSecrets(a.project_id);
   if (s?.access_token && meta.meta_ids?.campaignId) {
     try { const { setMetaStatus } = await import('./meta'); await setMetaStatus(s.access_token, meta.meta_ids.campaignId, 'PAUSED'); }
     catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
@@ -421,7 +421,7 @@ export async function resumeAd(actionId: string): Promise<{ ok: boolean; error?:
   if (!a || a.kind !== 'ad' || a.status !== 'done') return { ok: false, error: 'Not a paused ad.' };
   const block = adSpendBlock(getCampaign(a.campaign_id), a.cost_cents);
   if (block) return { ok: false, error: block };
-  const meta = parseMeta(a.meta); const s = metaSecrets();
+  const meta = parseMeta(a.meta); const s = metaSecrets(a.project_id);
   if (s?.access_token && meta.meta_ids) {
     try {
       const { setMetaStatus } = await import('./meta');
@@ -435,7 +435,7 @@ export async function resumeAd(actionId: string): Promise<{ ok: boolean; error?:
 export async function removeAd(actionId: string): Promise<{ ok: boolean; error?: string }> {
   const a = getAction(actionId);
   if (!a || a.kind !== 'ad') return { ok: false, error: 'Not an ad.' };
-  const meta = parseMeta(a.meta); const s = metaSecrets();
+  const meta = parseMeta(a.meta); const s = metaSecrets(a.project_id);
   if (s?.access_token && meta.meta_ids?.campaignId) {
     try { const { deleteMetaEntity } = await import('./meta'); await deleteMetaEntity(s.access_token, meta.meta_ids.campaignId); } catch { /* best effort */ }
   }

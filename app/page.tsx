@@ -308,8 +308,8 @@ export default function Page() {
         />
       )}
       {showConnect && <ConnectModal auth={auth} onClose={() => setShowConnect(false)} reload={loadAuth} />}
-      {showChannels && <ChannelsModal onClose={() => setShowChannels(false)} hasCampaign={!!detail?.campaign} hasProject={!!currentId} onCreate={createAccount} />}
-      {showLaunch && detail && <LaunchModal onClose={() => setShowLaunch(false)} onLaunch={launchCampaign} />}
+      {showChannels && currentId && <ChannelsModal projectId={currentId} onClose={() => setShowChannels(false)} hasCampaign={!!detail?.campaign} hasProject={!!currentId} onCreate={createAccount} />}
+      {showLaunch && detail && currentId && <LaunchModal projectId={currentId} onClose={() => setShowLaunch(false)} onLaunch={launchCampaign} />}
       {showLists && currentId && <EmailListsModal projectId={currentId} onClose={() => setShowLists(false)} onChanged={() => currentId && loadDetail(currentId)} />}
     </>
   );
@@ -851,19 +851,19 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenL
 }
 
 // ----------------------------- Launch modal ---------------------------------
-function LaunchModal({ onClose, onLaunch }: { onClose: () => void; onLaunch: (budget: number, channels: string[]) => void }) {
+function LaunchModal({ projectId, onClose, onLaunch }: { projectId: string; onClose: () => void; onLaunch: (budget: number, channels: string[]) => void }) {
   const [budget, setBudget] = useState('0');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    fetch('/api/connectors').then((r) => r.json()).then((d: { connectors: Channel[] }) => {
+    fetch(`/api/connectors?project=${projectId}`).then((r) => r.json()).then((d: { connectors: Channel[] }) => {
       const list = d.connectors.filter((c) => c.category !== 'automation' && c.key !== 'smtp');
       setChannels(list);
       setSel(new Set(list.map((c) => c.key))); // default: everything on
     });
-  }, []);
+  }, [projectId]);
 
   const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const cats: Record<string, string> = { organic: 'Organic & social', community: 'Communities', content: 'Content / SEO', email: 'Email & outreach', influencer: 'Influencer', paid: 'Paid ads' };
@@ -999,33 +999,26 @@ function EmailListsModal({ projectId, onClose, onChanged }: { projectId: string;
 }
 
 // ----------------------------- Channels modal -------------------------------
-function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
-  onClose: () => void; hasCampaign: boolean; hasProject: boolean; onCreate: (channel: string) => Promise<string | null>;
+function ChannelsModal({ projectId, onClose, hasCampaign, hasProject, onCreate }: {
+  projectId: string; onClose: () => void; hasCampaign: boolean; hasProject: boolean; onCreate: (channel: string) => Promise<string | null>;
 }) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [hook, setHook] = useState('');
   const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', from: '' });
 
-  const load = () => fetch('/api/connectors').then((r) => r.json()).then((d) => setChannels(d.connectors));
-  useEffect(() => { load(); }, []);
+  const post = (body: any) => fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: projectId, ...body }) });
+  const load = () => fetch(`/api/connectors?project=${projectId}`).then((r) => r.json()).then((d) => setChannels(d.connectors));
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [projectId]);
 
   const connect = async (key: string, secrets: any): Promise<{ connected: boolean; message: string }> => {
-    const r = await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, connect: true, secrets }) })
-      .then((x) => x.json()).catch(() => ({ connected: false, message: 'Request failed.' }));
+    const r = await post({ key, connect: true, secrets }).then((x) => x.json()).catch(() => ({ connected: false, message: 'Request failed.' }));
     await load();
     return r;
   };
-  const disconnect = async (key: string) => {
-    await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, connect: false }) });
-    load();
-  };
-  const setExclude = async (key: string, exclude: boolean) => {
-    await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, exclude }) });
-    load();
-  };
+  const disconnect = async (key: string) => { await post({ key, connect: false }); load(); };
+  const setExclude = async (key: string, exclude: boolean) => { await post({ key, exclude }); load(); };
   const selectMeta = async (sel: any) => {
-    const body = sel && sel.__refresh ? { key: 'meta_ads', refresh: true } : { key: 'meta_ads', select: sel };
-    await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    await post(sel && sel.__refresh ? { key: 'meta_ads', refresh: true } : { key: 'meta_ads', select: sel });
     await load();
   };
 
@@ -1102,7 +1095,7 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
                 <ChannelRow
                   key={c.key} c={c} webhookOn={!!webhookOn} smtpOn={!!smtpOn}
                   hasCampaign={hasCampaign} hasProject={hasProject}
-                  onConnect={connect} onDisconnect={disconnect} onCreate={onCreate} onExclude={setExclude} onMetaSelect={selectMeta}
+                  onConnect={connect} onDisconnect={disconnect} onCreate={onCreate} onExclude={setExclude} onMetaSelect={selectMeta} projectId={projectId}
                 />
               ))}
             </div>
@@ -1148,11 +1141,11 @@ function MetaConfig({ meta, onSelect }: { meta: MetaSel; onSelect: (sel: any) =>
   );
 }
 
-function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, onDisconnect, onCreate, onExclude, onMetaSelect }: {
+function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, onDisconnect, onCreate, onExclude, onMetaSelect, projectId }: {
   c: Channel; webhookOn: boolean; smtpOn: boolean; hasCampaign: boolean; hasProject: boolean;
   onConnect: (key: string, secrets: any) => Promise<{ connected: boolean; message: string }>;
   onDisconnect: (key: string) => void; onCreate: (channel: string) => Promise<string | null>;
-  onExclude: (key: string, exclude: boolean) => void; onMetaSelect?: (sel: any) => void;
+  onExclude: (key: string, exclude: boolean) => void; onMetaSelect?: (sel: any) => void; projectId: string;
 }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ handle: '', token: '', url: '' });
@@ -1174,7 +1167,7 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
 
   const startOAuth = async (payload: any) => {
     setBusy(true); setMsg(null);
-    const r = await fetch(`/api/oauth/${c.key}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    const r = await fetch(`/api/oauth/${c.key}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, project_id: projectId }) })
       .then((x) => x.json()).catch(() => ({ error: 'Could not start.' }));
     if (r.url) { window.location.href = r.url; } // redirect to the platform's OAuth consent
     else { setBusy(false); setMsg(r.error || 'Could not start.'); }

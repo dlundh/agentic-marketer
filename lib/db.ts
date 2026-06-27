@@ -102,15 +102,18 @@ function init(): DatabaseSync {
     );
 
     -- Connectors are GLOBAL (an account is connected once, reused by any campaign).
+    -- Connectors are scoped PER PROJECT: each marketed app has its own accounts.
     CREATE TABLE IF NOT EXISTS connectors (
-      key           TEXT PRIMARY KEY,                     -- channel key, e.g. 'webhook','smtp','x','meta_ads'
+      project_id    TEXT NOT NULL,
+      key           TEXT NOT NULL,                        -- channel key, e.g. 'webhook','smtp','x','meta_ads'
       label         TEXT NOT NULL,
-      executor      TEXT NOT NULL,                        -- webhook | smtp | manual
+      executor      TEXT NOT NULL,                        -- webhook | smtp | manual | <oauth provider>
       secrets       TEXT,                                 -- JSON credentials/config
       connected     INTEGER NOT NULL DEFAULT 0,
-      excluded      INTEGER NOT NULL DEFAULT 0,            -- user opted this channel out of action generation
+      excluded      INTEGER NOT NULL DEFAULT 0,            -- opted out of action generation
       created_at    INTEGER NOT NULL,
-      updated_at    INTEGER NOT NULL
+      updated_at    INTEGER NOT NULL,
+      PRIMARY KEY (project_id, key)
     );
 
     CREATE TABLE IF NOT EXISTS actions (
@@ -182,6 +185,19 @@ function init(): DatabaseSync {
   // Migrations: add columns to DBs created before they existed.
   try { db.exec(`ALTER TABLE connectors ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
   try { db.exec(`ALTER TABLE campaigns ADD COLUMN daily_cap_cents INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
+
+  // Migrate connectors from global (PK key) to per-project (PK project_id,key),
+  // assigning existing connections to the most-recently-updated project.
+  const ccols = db.prepare(`PRAGMA table_info(connectors)`).all() as any[];
+  if (ccols.length && !ccols.some((c) => c.name === 'project_id')) {
+    const proj = db.prepare(`SELECT id FROM projects ORDER BY updated_at DESC LIMIT 1`).get() as any;
+    const target = proj?.id || '';
+    db.exec(`DROP TABLE IF EXISTS connectors_mig;
+      CREATE TABLE connectors_mig (project_id TEXT NOT NULL, key TEXT NOT NULL, label TEXT NOT NULL, executor TEXT NOT NULL, secrets TEXT, connected INTEGER NOT NULL DEFAULT 0, excluded INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(project_id,key));`);
+    db.prepare(`INSERT INTO connectors_mig (project_id,key,label,executor,secrets,connected,excluded,created_at,updated_at)
+      SELECT ?,key,label,executor,secrets,connected,excluded,created_at,updated_at FROM connectors`).run(target);
+    db.exec(`DROP TABLE connectors; ALTER TABLE connectors_mig RENAME TO connectors;`);
+  }
 
   // NB: recovery of interrupted jobs is handled by orchestrator.reconcile(),
   // which is guarded by the live in-memory run registry so it can never flip a
@@ -348,7 +364,7 @@ export type Campaign = {
   autonomy: string; strategy: string | null; created_at: number; updated_at: number;
 };
 export type Connector = {
-  key: string; label: string; executor: string; secrets: string | null;
+  project_id: string; key: string; label: string; executor: string; secrets: string | null;
   connected: number; excluded: number; created_at: number; updated_at: number;
 };
 export type ActionRow = {
@@ -408,32 +424,31 @@ export function refundSpend(campaignId: string, cents: number) {
   db.prepare(`UPDATE campaigns SET spent_cents=MAX(0,spent_cents-?), updated_at=? WHERE id=?`).run(cents, now(), campaignId);
 }
 
-export function upsertConnector(c: { key: string; label: string; executor: string; secrets?: any; connected: boolean }) {
+export function upsertConnector(projectId: string, c: { key: string; label: string; executor: string; secrets?: any; connected: boolean }) {
   const t = now();
   const secrets = c.secrets ? JSON.stringify(c.secrets) : null;
   db.prepare(
-    `INSERT INTO connectors (key,label,executor,secrets,connected,created_at,updated_at)
-     VALUES (?,?,?,?,?,?,?)
-     ON CONFLICT(key) DO UPDATE SET label=excluded.label, executor=excluded.executor,
+    `INSERT INTO connectors (project_id,key,label,executor,secrets,connected,created_at,updated_at)
+     VALUES (?,?,?,?,?,?,?,?)
+     ON CONFLICT(project_id,key) DO UPDATE SET label=excluded.label, executor=excluded.executor,
        secrets=COALESCE(excluded.secrets, connectors.secrets), connected=excluded.connected, updated_at=excluded.updated_at`
-  ).run(c.key, c.label, c.executor, secrets, c.connected ? 1 : 0, t, t);
+  ).run(projectId, c.key, c.label, c.executor, secrets, c.connected ? 1 : 0, t, t);
 }
-export const getConnector = (key: string) =>
-  db.prepare(`SELECT * FROM connectors WHERE key=?`).get(key) as Connector | undefined;
-export const listConnectors = () =>
-  db.prepare(`SELECT * FROM connectors ORDER BY key ASC`).all() as Connector[];
-export function disconnectConnector(key: string) {
-  db.prepare(`UPDATE connectors SET connected=0, secrets=NULL, updated_at=? WHERE key=?`).run(now(), key);
+export const getConnector = (projectId: string, key: string) =>
+  db.prepare(`SELECT * FROM connectors WHERE project_id=? AND key=?`).get(projectId, key) as Connector | undefined;
+export const listConnectors = (projectId: string) =>
+  db.prepare(`SELECT * FROM connectors WHERE project_id=? ORDER BY key ASC`).all(projectId) as Connector[];
+export function disconnectConnector(projectId: string, key: string) {
+  db.prepare(`UPDATE connectors SET connected=0, secrets=NULL, updated_at=? WHERE project_id=? AND key=?`).run(now(), projectId, key);
+}
+export function setConnectorExcluded(projectId: string, key: string, excluded: boolean) {
+  db.prepare(`UPDATE connectors SET excluded=?, updated_at=? WHERE project_id=? AND key=?`).run(excluded ? 1 : 0, now(), projectId, key);
 }
 // Merge a partial into a connector's secrets JSON (keeps the token intact).
-export function updateConnectorSecrets(key: string, partial: Record<string, any>) {
-  const c = getConnector(key); if (!c) return;
+export function updateConnectorSecrets(projectId: string, key: string, partial: Record<string, any>) {
+  const c = getConnector(projectId, key); if (!c) return;
   const secrets = { ...(c.secrets ? JSON.parse(c.secrets) : {}), ...partial };
-  db.prepare(`UPDATE connectors SET secrets=?, updated_at=? WHERE key=?`).run(JSON.stringify(secrets), now(), key);
-}
-// Opt a channel in/out of action generation (without disconnecting it).
-export function setConnectorExcluded(key: string, excluded: boolean) {
-  db.prepare(`UPDATE connectors SET excluded=?, updated_at=? WHERE key=?`).run(excluded ? 1 : 0, now(), key);
+  db.prepare(`UPDATE connectors SET secrets=?, updated_at=? WHERE project_id=? AND key=?`).run(JSON.stringify(secrets), now(), projectId, key);
 }
 
 // --- email lists / recipients / suppressions --------------------------------

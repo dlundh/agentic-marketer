@@ -370,7 +370,7 @@ export async function runAgent(args: RunArgs): Promise<RunOutcome> {
       ? `The hard budget cap is $${(camp.budget_cents / 100).toFixed(2)} ${camp.currency}, of which $${(camp.spent_cents / 100).toFixed(2)} is already committed.`
       : `The budget is $0.`;
     const cats = ROLE_CATEGORIES[job.kind] || ROLE_CATEGORIES.organic;
-    const connected = autoChannels(); // only connected/auto-publishable channels
+    const connected = autoChannels(project.id); // only connected/auto-publishable channels
     const inScope = CHANNELS.filter((c) => cats.includes(c.category) && connected.includes(c.key) && c.key !== 'webhook' && c.key !== 'smtp');
     const labels = inScope.map((c) => `${c.label} (${c.key})`).join(', ');
     const existing = camp ? listActions(camp.id).filter((a) => inScope.some((c) => c.key === a.channel)).map((a) => a.title) : [];

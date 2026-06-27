@@ -16,9 +16,12 @@ export const maxDuration = 30;
 export async function POST(req: Request, { params }: { params: Promise<{ provider: string }> }) {
   const { provider } = await params;
   const body = await req.json().catch(() => ({}));
+  const projectId = String(body.project_id || '');
+  if (!projectId) return NextResponse.json({ error: 'No project selected.' }, { status: 400 });
   const origin = new URL(req.url).origin;
   const redirectUri = `${origin}/api/oauth/${provider}/callback`;
-  const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  // Carry the project through the round-trip (the callback parses it back).
+  const state = `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}__${projectId}`;
   const label = channelDef(provider).label;
 
   try {
@@ -26,7 +29,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ provide
       const instance = normalizeInstance(body.instance || '');
       if (!instance || !instance.includes('.')) return NextResponse.json({ error: 'Enter your instance, e.g. mastodon.social' }, { status: 400 });
       const { client_id, client_secret } = await registerMastodonApp(instance, redirectUri);
-      upsertConnector({ key: 'mastodon', label, executor: 'mastodon', connected: false, secrets: { instance, client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
+      upsertConnector(projectId, { key: 'mastodon', label, executor: 'mastodon', connected: false, secrets: { instance, client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
       return NextResponse.json({ url: authorizeUrl(instance, client_id, redirectUri, state) });
     }
 
@@ -36,19 +39,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ provide
 
     if (provider === 'x') {
       const { verifier, challenge } = pkce();
-      upsertConnector({ key: 'x', label, executor: 'x', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state, code_verifier: verifier } });
+      upsertConnector(projectId, { key: 'x', label, executor: 'x', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state, code_verifier: verifier } });
       return NextResponse.json({ url: xAuthorizeUrl(client_id, redirectUri, state, challenge) });
     }
     if (provider === 'reddit') {
-      upsertConnector({ key: 'reddit', label, executor: 'reddit', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
+      upsertConnector(projectId, { key: 'reddit', label, executor: 'reddit', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
       return NextResponse.json({ url: redditAuthorizeUrl(client_id, redirectUri, state) });
     }
     if (provider === 'linkedin') {
-      upsertConnector({ key: 'linkedin', label, executor: 'linkedin', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
+      upsertConnector(projectId, { key: 'linkedin', label, executor: 'linkedin', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
       return NextResponse.json({ url: linkedinAuthorizeUrl(client_id, redirectUri, state) });
     }
     if (provider === 'meta_ads') {
-      upsertConnector({ key: 'meta_ads', label, executor: 'meta_ads', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
+      upsertConnector(projectId, { key: 'meta_ads', label, executor: 'meta_ads', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
       return NextResponse.json({ url: metaAuthorizeUrl(client_id, redirectUri, state) });
     }
     return NextResponse.json({ error: 'Unsupported provider.' }, { status: 400 });

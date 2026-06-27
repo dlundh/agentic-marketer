@@ -57,10 +57,10 @@ export const CHANNELS: ChannelDef[] = [
 export const channelDef = (key: string): ChannelDef =>
   CHANNELS.find((c) => c.key === key) || { key, label: key, category: 'content', executor: 'manual' };
 
-export function seedConnectors() {
+export function seedConnectors(projectId: string) {
   for (const ch of CHANNELS) {
-    if (!getConnector(ch.key)) {
-      upsertConnector({ key: ch.key, label: ch.label, executor: ch.executor, connected: false });
+    if (!getConnector(projectId, ch.key)) {
+      upsertConnector(projectId, { key: ch.key, label: ch.label, executor: ch.executor, connected: false });
     }
   }
 }
@@ -141,13 +141,13 @@ const safeJSON = (s: string | null) => { try { return s ? JSON.parse(s) : null; 
 
 // The set of channel keys that can auto-publish right now (connected natively,
 // via a per-channel webhook, the global webhook, or SMTP). Drives swarm scoping.
-export function autoChannels(): string[] {
-  const webhookOn = !!getConnector('webhook')?.connected;
-  const smtpOn = !!getConnector('smtp')?.connected;
+export function autoChannels(projectId: string): string[] {
+  const webhookOn = !!getConnector(projectId, 'webhook')?.connected;
+  const smtpOn = !!getConnector(projectId, 'smtp')?.connected;
   const keys: string[] = [];
   for (const ch of CHANNELS) {
     if (ch.key === 'webhook' || ch.key === 'smtp') continue;
-    const own = getConnector(ch.key);
+    const own = getConnector(projectId, ch.key);
     if (own?.excluded) continue; // user opted this channel out of action generation
     const s = own?.connected ? safeJSON(own.secrets) : null;
     const native = ['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads'].includes(ch.key) && s?.access_token;
@@ -164,13 +164,13 @@ export function autoChannels(): string[] {
 export function isAutoExecutable(action: ActionRow): boolean {
   if (action.kind === 'account') return false; // account creation is always human
   const def = channelDef(action.channel);
-  const own = getConnector(action.channel);
+  const own = getConnector(action.project_id, action.channel);
   const ownSecrets = own?.connected ? safeJSON(own.secrets) : null;
   if (['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads'].includes(action.channel) && ownSecrets?.access_token) return true; // native API
   if (ownSecrets?.url) return true; // per-channel webhook
   const emailish = def.executor === 'smtp' || ['email', 'outreach'].includes(action.kind);
-  if (emailish && getConnector('smtp')?.connected) return true; // SMTP
-  if (getConnector('webhook')?.connected) return true; // global automation webhook
+  if (emailish && getConnector(action.project_id, 'smtp')?.connected) return true; // SMTP
+  if (getConnector(action.project_id, 'webhook')?.connected) return true; // automation webhook
   return false;
 }
 
@@ -183,7 +183,7 @@ function subredditOf(action: ActionRow): string | null {
 }
 
 // Run a post; on auth failure, refresh the token once, persist it, and retry.
-async function withRefresh(channel: string, secrets: any, label: string, doPost: (token: string) => Promise<any>) {
+async function withRefresh(projectId: string, channel: string, secrets: any, label: string, doPost: (token: string) => Promise<any>) {
   try {
     return await doPost(secrets.access_token);
   } catch (e) {
@@ -192,7 +192,7 @@ async function withRefresh(channel: string, secrets: any, label: string, doPost:
       ? await refreshX(secrets.client_id, secrets.client_secret, secrets.refresh_token)
       : await refreshReddit(secrets.client_id, secrets.client_secret, secrets.refresh_token);
     const merged = { ...secrets, ...t };
-    upsertConnector({ key: channel, label, executor: channel, connected: true, secrets: merged });
+    upsertConnector(projectId, { key: channel, label, executor: channel, connected: true, secrets: merged });
     return await doPost(merged.access_token);
   }
 }
@@ -237,10 +237,10 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
   }
   const def = channelDef(action.channel);
   const emailish = def.executor === 'smtp' || ['email', 'outreach'].includes(action.kind);
-  const own = getConnector(action.channel);
+  const own = getConnector(action.project_id, action.channel);
   const ownSecrets = own?.connected ? safeJSON(own.secrets) : null;
-  const smtp = getConnector('smtp');
-  const hook = getConnector('webhook');
+  const smtp = getConnector(action.project_id, 'smtp');
+  const hook = getConnector(action.project_id, 'webhook');
 
   try {
     // Native API adapters: post directly via the platform (no webhook needed).
@@ -250,13 +250,13 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
       return { status: 'done', detail: `Posted to Mastodon${ownSecrets.handle ? ` as @${ownSecrets.handle}` : ''}${r.count > 1 ? ` (${r.count}-post thread)` : ''}: ${r.url}` };
     }
     if (action.channel === 'x' && ownSecrets?.access_token) {
-      const r = await withRefresh('x', ownSecrets, def.label, (tok) => postX(tok, text));
+      const r = await withRefresh(action.project_id, 'x', ownSecrets, def.label, (tok) => postX(tok, text));
       return { status: 'done', detail: `Posted to X${ownSecrets.handle ? ` as @${ownSecrets.handle}` : ''}${r.count > 1 ? ` (${r.count}-tweet thread)` : ''}: ${r.url}` };
     }
     if (action.channel === 'reddit' && ownSecrets?.access_token) {
       const sub = subredditOf(action);
       if (!sub) return { status: 'ready', detail: 'Approved — add a target subreddit (e.g. r/IndieMusic) to this action, then it can auto-post.' };
-      const r = await withRefresh('reddit', ownSecrets, def.label, (tok) => postReddit(tok, sub, action.title, action.content || ''));
+      const r = await withRefresh(action.project_id, 'reddit', ownSecrets, def.label, (tok) => postReddit(tok, sub, action.title, action.content || ''));
       return { status: 'done', detail: `Posted to r/${sub}: ${r.url}` };
     }
     if (action.channel === 'linkedin' && ownSecrets?.access_token && ownSecrets?.author) {
