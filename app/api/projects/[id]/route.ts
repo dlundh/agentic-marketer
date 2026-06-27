@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   getProject, listJobs, listFindings, listFiles, listActivity,
-  getCampaignByProject, listActions, listEmailLists,
+  getCampaignByProject, listActions, listEmailLists, listDirectives,
 } from '@/lib/db';
 import { isRunning } from '@/lib/orchestrator';
 import { isAutoExecutable } from '@/lib/connectors';
@@ -30,5 +30,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     campaign: campaign ?? null,
     actions,
     lists: listEmailLists(id),
+    directives: listDirectives(id),
   });
 }

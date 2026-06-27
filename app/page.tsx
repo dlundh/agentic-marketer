@@ -15,7 +15,8 @@ type Project = { id: string; title: string; prompt: string; url: string | null; 
 type Campaign = { id: string; status: string; currency: string; budget_cents: number; spent_cents: number; channels: string | null; autonomy: string; strategy: string | null };
 type ActionItem = { id: string; channel: string; kind: string; title: string; summary: string | null; content: string | null; meta: string | null; cost_cents: number; status: string; result: string | null; job_id: string | null; auto?: boolean };
 type EmailList = { id: string; name: string; total?: number; active?: number };
-type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[]; lists?: EmailList[] };
+type Directive = { id: string; text: string; created_at: number };
+type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[]; lists?: EmailList[]; directives?: Directive[] };
 type Auth = { connected: boolean; method: string; detail: string };
 type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean; excluded?: boolean };
 
@@ -107,6 +108,14 @@ export default function Page() {
     await loadProjects();
     setCurrentId(d.project.id);
     if (!auth?.connected) setShowConnect(true);
+  };
+
+  const addDirection = async (text: string) => {
+    if (!currentId || !text.trim()) return;
+    await fetch(`/api/projects/${currentId}/directives`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+    });
+    loadDetail(currentId);
   };
 
   const control = async (jobId: string, action: 'pause' | 'resume') => {
@@ -208,6 +217,7 @@ export default function Page() {
               {' '}<PhaseChip phase={detail.project.phase} />
               {!showJobs && <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· {detail.jobs.length} agent{detail.jobs.length === 1 ? '' : 's'} hidden</span>}
             </h2>
+            <DirectionBox directives={detail.directives || []} onAdd={addDirection} />
             {showJobs && (
               <div className="jobs">
                 {detail.jobs.map((j) => (
@@ -467,6 +477,41 @@ function JobModal({ job, findings, files, onClose }: {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ----------------------------- Direction box --------------------------------
+// Project-level steering: free-form guidance that shapes the whole approach.
+function DirectionBox({ directives, onAdd }: { directives: Directive[]; onAdd: (t: string) => Promise<void> | void }) {
+  const [open, setOpen] = useState(true);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => { if (!text.trim()) return; setBusy(true); await onAdd(text.trim()); setBusy(false); setText(''); };
+  return (
+    <div className="direction">
+      <button className="dir-head" onClick={() => setOpen((v) => !v)}>
+        <span className="caret">{open ? '▾' : '▸'}</span> 💬 Direction &amp; ideas{directives.length ? ` · ${directives.length}` : ''}
+        <span className="dir-hint">steer the whole marketing approach</span>
+      </button>
+      {open && (
+        <div className="dir-body">
+          {directives.length > 0 && (
+            <div className="dir-log">
+              {directives.map((d) => <div className="dir-msg" key={d.id}>{d.text}<span className="dir-time">{ago(d.created_at)}</span></div>)}
+            </div>
+          )}
+          <div className="dir-input">
+            <textarea
+              placeholder="Add a direction or idea that shapes everything — e.g. “lean into the anti-gatekeeper / underdog angle”, “emphasize the free tier”, “keep the tone witty, no corporate-speak”, “go after bedroom producers in the UK first”…"
+              value={text} onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); }}
+            />
+            <button className="revise-btn" onClick={submit} disabled={busy || !text.trim()}>{busy ? <span className="spin">⟳</span> : 'Add direction'}</button>
+          </div>
+          <div className="note" style={{ fontSize: 11 }}>Applied to all future research, generation, optimization, and revisions. Hit ✨ Generate or ⚡ Optimize to use it now.</div>
+        </div>
+      )}
     </div>
   );
 }

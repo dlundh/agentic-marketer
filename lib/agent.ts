@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs';
 import {
   DATA_DIR, uid, addActivity, addFinding, addFile, updateJob, updateProject,
   getProject, getJob, touchJob, getCampaignByProject, updateCampaign, createAction,
-  getAction, updateAction, listFindings, type Job, type Project, type ActionRow,
+  getAction, updateAction, listFindings, directivesText, type Job, type Project, type ActionRow,
 } from './db';
 import { emitEvent } from './events';
 import { renderPdf, type PdfSection } from './pdf';
@@ -202,9 +202,17 @@ const RESEARCH_TOOLS = [T('save_finding'), T('create_pdf_report'), T('mark_resea
 const MARKETING_TOOLS = [T('save_finding'), T('create_pdf_report'), T('mark_marketing_complete')];
 const EXEC_TOOLS = [T('save_finding'), T('create_pdf_report'), T('check_budget'), T('propose_action'), T('set_strategy')];
 
+// User's steering guidance, injected into every agent prompt so it shapes the
+// whole approach. Empty string when there's none.
+function directionBlock(projectId: string): string {
+  const t = directivesText(projectId);
+  return t ? `\nUSER DIRECTION — overriding guidance from the human; weave this into everything you decide and produce:\n${t}\n` : '';
+}
+
 function researchPrompt(p: Project, attachments: string[]): string {
   return [
     `You are an autonomous market-research agent for a product/service marketing platform.`,
+    directionBlock(p.id),
     ``,
     `THE USER WANTS TO MARKET THE FOLLOWING:`,
     p.prompt,
@@ -227,6 +235,7 @@ function researchPrompt(p: Project, attachments: string[]): string {
 function marketingPrompt(p: Project, findings: string): string {
   return [
     `You are an autonomous marketing strategist. Research on this product/service is complete.`,
+    directionBlock(p.id),
     ``,
     `PRODUCT/SERVICE: ${p.prompt}`,
     p.url ? `URL: ${p.url}` : '',
@@ -291,7 +300,7 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
     ? `CONNECTED CHANNELS — you may ONLY propose actions for these (every action must be auto-publishable): ${channelLabels}. Never propose for any channel not in this list.`
     : `No channels in your area are connected yet, so nothing you propose could be published. Do NOT propose any actions — instead state briefly that the user should connect a channel under "⚙ Channels" to enable this.`;
   const dupeLine = existing.length ? `\nThese actions already exist — propose NEW, materially different ones, do not repeat them: ${existing.slice(0, 40).join(' | ')}.` : '';
-  const ctx = `\nRESEARCH & PLAN CONTEXT:\n${findings}\n${p.summary ? `\nOverall strategy: ${p.summary}` : ''}\n\n${scopeLine}${dupeLine}\n`;
+  const ctx = `${directionBlock(p.id)}\nRESEARCH & PLAN CONTEXT:\n${findings}\n${p.summary ? `\nOverall strategy: ${p.summary}` : ''}\n\n${scopeLine}${dupeLine}\n`;
   const jobByRole: Record<string, string> = {
     strategist: [
       `YOUR ROLE — Growth Strategist:`,
@@ -491,6 +500,7 @@ export async function runRevision(opts: { action: ActionRow; feedback: string; a
 
   const prompt = [
     `You are refining ONE proposed marketing action based on the user's feedback. Keep it sharp, on-brand for this product, ETHICAL (no spam, fake engagement, deceptive or audience-annoying tactics), and within budget. ${budgetLine}`,
+    directionBlock(project.id),
     ``,
     `PRODUCT: ${project.prompt}${project.url ? ` (${project.url})` : ''}`,
     `CHANNEL: ${channelDef(action.channel).label} · ${action.kind}`,

@@ -166,6 +166,16 @@ function init(): DatabaseSync {
       created_at  INTEGER NOT NULL,
       PRIMARY KEY (project_id, email)
     );
+
+    -- Project-level steering: free-form guidance the user adds that shapes the
+    -- entire marketing approach (fed into every agent prompt).
+    CREATE TABLE IF NOT EXISTS directives (
+      id          TEXT PRIMARY KEY,
+      project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      text        TEXT NOT NULL,
+      created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_directives_proj ON directives(project_id);
   `);
 
   // Migration: add connectors.excluded to DBs created before this column existed.
@@ -466,6 +476,23 @@ export function addSuppressions(projectId: string, emails: string[], reason = 'm
 }
 export const listSuppressions = (projectId: string) =>
   db.prepare(`SELECT email, reason, created_at FROM suppressions WHERE project_id=? ORDER BY created_at DESC`).all(projectId) as { email: string; reason: string; created_at: number }[];
+
+// --- project direction (steering guidance) ----------------------------------
+
+export type Directive = { id: string; project_id: string; text: string; created_at: number };
+export function addDirective(projectId: string, text: string): Directive {
+  const id = uid('dir_'); const t = now();
+  db.prepare(`INSERT INTO directives (id,project_id,text,created_at) VALUES (?,?,?,?)`).run(id, projectId, text.trim(), t);
+  return { id, project_id: projectId, text: text.trim(), created_at: t };
+}
+export const listDirectives = (projectId: string) =>
+  db.prepare(`SELECT * FROM directives WHERE project_id=? ORDER BY created_at ASC`).all(projectId) as Directive[];
+// Formatted block for injecting into agent prompts.
+export function directivesText(projectId: string): string {
+  const ds = listDirectives(projectId);
+  if (!ds.length) return '';
+  return ds.map((d, i) => `${i + 1}. ${d.text}`).join('\n');
+}
 
 export function createAction(a: {
   project_id: string; campaign_id: string; job_id?: string; channel: string; kind: string;
