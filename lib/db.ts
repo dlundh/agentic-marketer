@@ -541,8 +541,9 @@ export function updateAction(id: string, patch: Partial<ActionRow>) {
   db.prepare(`UPDATE actions SET status=?,result=?,title=?,summary=?,content=?,meta=?,cost_cents=?,updated_at=? WHERE id=?`)
     .run(n.status, n.result ?? null, n.title, n.summary ?? null, n.content ?? null, n.meta ?? null, n.cost_cents, n.updated_at, id);
 }
-// Recover actions left mid-revision by an interrupted run.
+// Recover actions left mid-revision by an interrupted run (e.g. a server restart),
+// and tell the user so it doesn't look like a silent no-op.
 export function resetStaleRevisions(staleMs: number) {
-  db.prepare(`UPDATE actions SET status='proposed', updated_at=? WHERE status='revising' AND updated_at < ?`)
+  db.prepare(`UPDATE actions SET status='proposed', result='Revision was interrupted (likely a restart) — click Revise again.', updated_at=? WHERE status='revising' AND updated_at < ?`)
     .run(now(), now() - staleMs);
 }
