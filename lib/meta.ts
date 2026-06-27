@@ -75,6 +75,9 @@ export async function launchMetaAd(token: string, actId: string, pageId: string,
   const campaign = await gpost(`/${act}/campaigns`, token, {
     name: spec.name, objective: spec.objective || 'OUTCOME_TRAFFIC', status: 'PAUSED',
     special_ad_categories: [],
+    // Required when budgets live on ad sets (not the campaign). false = each ad
+    // set's daily budget stays strict, which our daily-cap accounting relies on.
+    is_adset_budget_sharing_enabled: false,
   });
   const targeting: any = { geo_locations: { countries: spec.countries?.length ? spec.countries : ['US'] } };
   if (spec.ageMin) targeting.age_min = spec.ageMin;
