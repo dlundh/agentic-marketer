@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { listConnectors, upsertConnector, disconnectConnector, setConnectorExcluded, updateConnectorSecrets } from '@/lib/db';
+import { listConnectors, upsertConnector, disconnectConnector, setConnectorExcluded, updateConnectorSecrets, getConnector } from '@/lib/db';
 import { CHANNELS, seedConnectors, channelDef, pingWebhook, verifySmtp } from '@/lib/connectors';
+import { listAdAccounts, listPages } from '@/lib/meta';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -40,6 +41,21 @@ export async function POST(req: Request) {
   if (typeof body.exclude === 'boolean') {
     setConnectorExcluded(key, body.exclude);
     return NextResponse.json({ ok: true, excluded: body.exclude });
+  }
+
+  // Re-fetch Meta ad accounts + Pages (e.g. after creating a new Page) — no re-auth.
+  if (body.refresh && key === 'meta_ads') {
+    const conn = getConnector('meta_ads');
+    const s = conn?.secrets ? JSON.parse(conn.secrets) : null;
+    if (!s?.access_token) return NextResponse.json({ error: 'Meta isn’t connected.' }, { status: 400 });
+    try {
+      const accounts = await listAdAccounts(s.access_token);
+      const pages = await listPages(s.access_token);
+      updateConnectorSecrets('meta_ads', { accounts, pages });
+      return NextResponse.json({ ok: true, accounts: accounts.length, pages: pages.length });
+    } catch (e: any) {
+      return NextResponse.json({ error: String(e?.message || e) }, { status: 400 });
+    }
   }
 
   // Update Meta selection (ad account / page / default ad image) without re-auth.

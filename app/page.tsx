@@ -1002,9 +1002,10 @@ function ChannelsModal({ onClose, hasCampaign, hasProject, onCreate }: {
     await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, exclude }) });
     load();
   };
-  const selectMeta = async (sel: Partial<MetaSel>) => {
-    await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'meta_ads', select: sel }) });
-    load();
+  const selectMeta = async (sel: any) => {
+    const body = sel && sel.__refresh ? { key: 'meta_ads', refresh: true } : { key: 'meta_ads', select: sel };
+    await fetch('/api/connectors', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    await load();
   };
 
   const [hookBusy, setHookBusy] = useState(false); const [hookMsg, setHookMsg] = useState<string | null>(null);
@@ -1096,7 +1097,10 @@ function MetaConfig({ meta, onSelect }: { meta: MetaSel; onSelect: (sel: any) =>
   const [img, setImg] = useState(meta.default_image_url || '');
   return (
     <div className="meta-cfg">
-      <div className="note" style={{ fontSize: 11.5, fontWeight: 600 }}>Ad spend settings</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div className="note" style={{ fontSize: 11.5, fontWeight: 600 }}>Ad spend settings</div>
+        <button className="mini" title="Re-fetch ad accounts & Pages from Meta (after creating a new one)" onClick={() => onSelect({ __refresh: true })}>↻ Refresh</button>
+      </div>
       <label className="meta-field"><span>Ad account</span>
         <select className="list-select" value={meta.ad_account_id} onChange={(e) => onSelect({ ad_account_id: e.target.value })}>
           {!meta.accounts.length && <option value="">(no ad accounts found)</option>}
