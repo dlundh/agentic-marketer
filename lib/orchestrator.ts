@@ -524,14 +524,23 @@ async function pollAllCampaigns() {
 // HMR/restart — consistent with the app's DB-driven, no-singleton model.
 export function autonomousTick(projectId: string) {
   const c = getCampaignByProject(projectId);
-  if (!c || c.status !== 'active' || !c.auto_posts) return;
+  if (!c || c.status !== 'active') return;
   const ticks: Record<string, number> = ((globalThis as any).__autoTick ||= {});
   const now = Date.now();
   if (now - (ticks[projectId] || 0) < 45_000) return; // throttle: at most once / 45s per project
   ticks[projectId] = now;
-  scheduleProposedPosts(projectId);  // queue any proposed posts for connected channels
-  refillScheduledPosts(projectId);   // generate fresh posts if the pipeline is thin
-  publishDuePosts().catch(() => {});  // publish anything whose slot has arrived
+  // Posts pipeline only runs in full-auto mode.
+  if (c.auto_posts) {
+    scheduleProposedPosts(projectId);  // queue any proposed posts for connected channels
+    refillScheduledPosts(projectId);   // generate fresh posts if the pipeline is thin
+    publishDuePosts().catch(() => {});  // publish anything whose slot has arrived
+  }
+  // Ad spend sync + cap/auto-pause enforcement runs whenever there are live ads,
+  // regardless of post-automation — so spend stays current and the cap is acted
+  // on promptly while the project is open (the 5-min poller covers it otherwise).
+  if (listActions(c.id).some((a) => a.kind === 'ad' && a.status === 'done')) {
+    runAdOptimizer(projectId).catch(() => {});
+  }
 }
 
 // Performance thresholds for auto-pausing a losing ad. Conservative: an ad gets

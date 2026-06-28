@@ -741,8 +741,9 @@ function AdControls({ campaign, onCampaignAction, liveAds }: { campaign: Campaig
             {Object.entries(AUTONOMY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         </label>
-        <button className="mini" title="Pull real spend from Meta & auto-pause if the cap is hit" onClick={() => onCampaignAction({ action: 'optimize_ads' })}>↻ Sync spend</button>
+        <button className="mini" title="Spend auto-syncs while this project is open and every 5 min in the background; click to refresh now." onClick={() => onCampaignAction({ action: 'optimize_ads' })}>↻ Sync now</button>
       </div>
+      {liveAds > 0 && <div className="note" style={{ fontSize: 11 }}>Spend auto-syncs from the ad platform while this project is open (and every 5 min in the background); ads auto-pause at the cap.</div>}
       {campaign.daily_cap_cents > 0 && <div className="note" style={{ fontSize: 11 }}>Hard rails: total cap {usd(campaign.budget_cents)} · daily cap {usd(campaign.daily_cap_cents)}. At the cap, ads auto-pause.</div>}
     </div>
   );
