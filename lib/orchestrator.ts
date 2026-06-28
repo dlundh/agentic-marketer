@@ -450,8 +450,29 @@ async function pollAllCampaigns() {
   await publishDuePosts();
 }
 {
+  // Re-arm on every module load: in Next dev, HMR reloads this module but a
+  // setInterval guarded on globalThis would keep firing the OLD closure (stale
+  // code from before the reload). Clearing + re-creating binds the timer to the
+  // current code. The interval is only a backup — autonomousTick() (below),
+  // called from request paths, is the reliable driver.
   const gp = globalThis as any;
-  if (!gp.__adPoll) gp.__adPoll = setInterval(() => { pollAllCampaigns().catch(() => {}); }, POLL_MS);
+  if (gp.__adPoll) clearInterval(gp.__adPoll);
+  gp.__adPoll = setInterval(() => { pollAllCampaigns().catch(() => {}); }, POLL_MS);
+}
+
+// Advance the autonomous loop for ONE project on demand. Called (fire-and-forget,
+// throttled) from request paths so progress never depends on a timer surviving
+// HMR/restart — consistent with the app's DB-driven, no-singleton model.
+export function autonomousTick(projectId: string) {
+  const c = getCampaignByProject(projectId);
+  if (!c || c.status !== 'active' || !c.auto_posts) return;
+  const ticks: Record<string, number> = ((globalThis as any).__autoTick ||= {});
+  const now = Date.now();
+  if (now - (ticks[projectId] || 0) < 45_000) return; // throttle: at most once / 45s per project
+  ticks[projectId] = now;
+  scheduleProposedPosts(projectId);  // queue any proposed posts for connected channels
+  refillScheduledPosts(projectId);   // generate fresh posts if the pipeline is thin
+  publishDuePosts().catch(() => {});  // publish anything whose slot has arrived
 }
 
 // Performance thresholds for auto-pausing a losing ad. Conservative: an ad gets

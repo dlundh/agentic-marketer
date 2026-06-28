@@ -752,13 +752,20 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
           <div className="auto-banner">
             <div className="auto-banner-head">
               <span className="fa-on">🤖 Autonomous marketing is ON</span>
-              {anyExecLive && <span className="auto-working"><span className="spin">⟳</span> agents generating…</span>}
+              {anyExecLive
+                ? <span className="auto-working"><span className="spin">⟳</span> agents generating…</span>
+                : scheduled.length === 0 && <span className="auto-working"><span className="spin">⟳</span> queuing the next batch…</span>}
             </div>
             <div className="auto-banner-stats">
               <span>⏱ <b>{scheduled.length}</b> post{scheduled.length === 1 ? '' : 's'} scheduled</span>
               {scheduled[0]?.scheduled_at && <span>· next publishes <b>{fmtWhen(scheduled[0].scheduled_at)}</b></span>}
               <span>· <b>{actions.filter((a) => a.kind === 'ad' && a.status === 'done' && !metaPaused(a)).length}</b> live ad(s)</span>
             </div>
+            {scheduled.length === 0 && !anyExecLive && (
+              <div className="note" style={{ fontSize: 11.5 }}>
+                No posts queued for your connected channels yet — the swarm generates a fresh batch automatically (it just needs connected organic channels like X / LinkedIn / Mastodon). You can also hit <b>✨ Generate actions</b> to kick it off now.
+              </div>
+            )}
             <div className="note" style={{ fontSize: 11.5 }}>
               Posts generate &amp; publish on their own at the best time per channel; ads auto-launch &amp; auto-pause on performance. The pipeline refills itself — no clicks needed. Caps + kill switch still apply. Email/influencer still need a list + your OK.
             </div>
