@@ -6,6 +6,8 @@ import {
   pkce, xAuthorizeUrl, redditAuthorizeUrl, linkedinAuthorizeUrl,
 } from '@/lib/oauth';
 import { metaAuthorizeUrl } from '@/lib/meta';
+import { googleAuthorizeUrl } from '@/lib/google';
+import { redditAdsAuthorizeUrl } from '@/lib/redditads';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -53,6 +55,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ provide
     if (provider === 'meta_ads') {
       upsertConnector(projectId, { key: 'meta_ads', label, executor: 'meta_ads', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
       return NextResponse.json({ url: metaAuthorizeUrl(client_id, redirectUri, state) });
+    }
+    if (provider === 'google_ads') {
+      // Google Ads also needs a developer token + target customer id (entered in the dialog).
+      const developer_token = String(body.developer_token || '').trim();
+      const customer_id = String(body.customer_id || '').trim();
+      const login_customer_id = String(body.login_customer_id || '').trim();
+      if (!developer_token || !customer_id) return NextResponse.json({ error: 'Google Ads also needs your Developer token and Customer ID.' }, { status: 400 });
+      upsertConnector(projectId, { key: 'google_ads', label, executor: 'google_ads', connected: false, secrets: { client_id, client_secret, developer_token, customer_id, login_customer_id, redirect_uri: redirectUri, pending_state: state } });
+      return NextResponse.json({ url: googleAuthorizeUrl(client_id, redirectUri, state) });
+    }
+    if (provider === 'reddit_ads') {
+      upsertConnector(projectId, { key: 'reddit_ads', label, executor: 'reddit_ads', connected: false, secrets: { client_id, client_secret, redirect_uri: redirectUri, pending_state: state } });
+      return NextResponse.json({ url: redditAdsAuthorizeUrl(client_id, redirectUri, state) });
     }
     return NextResponse.json({ error: 'Unsupported provider.' }, { status: 400 });
   } catch (e: any) {

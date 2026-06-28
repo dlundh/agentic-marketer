@@ -1,7 +1,8 @@
 import nodemailer from 'nodemailer';
 import { getConnector, upsertConnector, activeRecipients, getProject, type ActionRow, type Connector, type Recipient } from './db';
 import { postMastodon, postX, refreshX, postReddit, refreshReddit, postLinkedin } from './oauth';
-import { launchMetaAd, setMetaStatus } from './meta';
+import type { AdSpec } from './meta';
+import { isAdChannel, adProvider } from './adproviders';
 
 // ---------------------------------------------------------------------------
 // Channel catalog + execution adapters.
@@ -47,9 +48,9 @@ export const CHANNELS: ChannelDef[] = [
   { key: 'email', label: 'Email outreach', category: 'email', executor: 'smtp' },
   { key: 'influencer', label: 'Influencer / creator outreach', category: 'influencer', executor: 'smtp' },
 
-  { key: 'meta_ads', label: 'Meta Ads', category: 'paid', executor: 'webhook', paid: true },
-  { key: 'google_ads', label: 'Google Ads', category: 'paid', executor: 'webhook', paid: true },
-  { key: 'reddit_ads', label: 'Reddit Ads', category: 'paid', executor: 'webhook', paid: true },
+  { key: 'meta_ads', label: 'Meta Ads', category: 'paid', executor: 'webhook', paid: true, note: 'Autonomous Meta (Facebook/Instagram) ad spend. Needs Business Verification + App Review for ads_management and an ad account with billing.' },
+  { key: 'google_ads', label: 'Google Ads', category: 'paid', executor: 'webhook', paid: true, note: 'Autonomous Google search-ad spend. Needs a Google Ads API developer token (Basic access) + your customer id, plus an account with billing. Written to spec — validate live once your token is approved.' },
+  { key: 'reddit_ads', label: 'Reddit Ads', category: 'paid', executor: 'webhook', paid: true, note: 'Autonomous Reddit ad spend. Reddit Ads API access is approval-gated. Written to spec — validate live once Reddit grants API access to your ad account.' },
   { key: 'tiktok_ads', label: 'TikTok Ads', category: 'paid', executor: 'webhook', paid: true },
   { key: 'x_ads', label: 'X Ads', category: 'paid', executor: 'webhook', paid: true },
 ];
@@ -150,7 +151,7 @@ export function autoChannels(projectId: string): string[] {
     const own = getConnector(projectId, ch.key);
     if (own?.excluded) continue; // user opted this channel out of action generation
     const s = own?.connected ? safeJSON(own.secrets) : null;
-    const native = ['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads'].includes(ch.key) && s?.access_token;
+    const native = ['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads', 'google_ads', 'reddit_ads'].includes(ch.key) && s?.access_token;
     const ownHook = !!s?.url;
     const viaWebhook = webhookOn && ch.executor === 'webhook';
     const viaSmtp = smtpOn && ch.executor === 'smtp';
@@ -166,7 +167,7 @@ export function isAutoExecutable(action: ActionRow): boolean {
   const def = channelDef(action.channel);
   const own = getConnector(action.project_id, action.channel);
   const ownSecrets = own?.connected ? safeJSON(own.secrets) : null;
-  if (['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads'].includes(action.channel) && ownSecrets?.access_token) return true; // native API
+  if (['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads', 'google_ads', 'reddit_ads'].includes(action.channel) && ownSecrets?.access_token) return true; // native API
   if (ownSecrets?.url) return true; // per-channel webhook
   const emailish = def.executor === 'smtp' || ['email', 'outreach'].includes(action.kind);
   if (emailish && getConnector(action.project_id, 'smtp')?.connected) return true; // SMTP
@@ -263,33 +264,36 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
       const r = await postLinkedin(ownSecrets.access_token, ownSecrets.author, text);
       return { status: 'done', detail: `Posted to LinkedIn${ownSecrets.handle ? ` as ${ownSecrets.handle}` : ''}${r.url ? `: ${r.url}` : ''}` };
     }
-    // Meta Ads: build + launch a real campaign (created PAUSED, then activated).
-    if (action.channel === 'meta_ads') {
+    // Paid ads (Meta / Google / Reddit): build a common spec + launch a real,
+    // PAUSED campaign via the channel's provider, then activate it.
+    if (isAdChannel(action.channel)) {
+      const provider = adProvider(action.channel)!;
       const s = ownSecrets;
-      if (!s?.access_token || !s?.ad_account_id || !s?.page_id) {
-        return { status: 'ready', detail: 'Ad campaign prepared. Connect Meta Ads (finish Meta business verification + app review, then pick your ad account & page) to launch it for real.' };
+      if (!s?.access_token) {
+        return { status: 'ready', detail: `Ad campaign prepared. Connect ${def.label} under ⚙ Channels (finish that platform's API approval, then pick your ad account) to launch it for real.` };
       }
       const m = safeJSON(action.meta) || {};
       const link = m.link || s.default_link || getProject(action.project_id)?.url || '';
       if (!link) return { status: 'ready', detail: 'Ad is ready but has no destination URL — add a link before launching.' };
-      if (/\b(apps\.apple\.com|itunes\.apple\.com|play\.google\.com)\b/i.test(link)) {
+      // App Store URLs are a Meta-objective limitation specifically.
+      if (action.channel === 'meta_ads' && /\b(apps\.apple\.com|itunes\.apple\.com|play\.google\.com)\b/i.test(link)) {
         return { status: 'ready', detail: 'This ad points to an App Store URL — Meta only allows those with the App Installs objective. Set a website "Default ad destination URL" under ⚙ Channels → Meta Ads (e.g. your landing page), then approve.' };
       }
-      const imageUrl = m.image_url || m.picture || s.default_image_url;
-      if (!imageUrl) return { status: 'ready', detail: 'Ad needs a creative image. Set a default ad image URL under ⚙ Channels → Meta Ads, or add one to this action, then approve.' };
-      const spec = {
-        name: action.title.slice(0, 80), objective: m.objective || 'OUTCOME_TRAFFIC',
+      const spec: AdSpec = {
+        name: action.title.slice(0, 80), objective: m.objective,
         dailyBudgetCents: action.cost_cents || 500,
         message: action.content || action.summary || '', headline: m.headline || action.title.slice(0, 40),
-        description: m.description || '', link, imageUrl, cta: m.cta || 'LEARN_MORE',
+        description: m.description || '', link,
+        imageUrl: m.image_url || m.picture || s.default_image_url, cta: m.cta || 'LEARN_MORE',
+        headlines: m.headlines, descriptions: m.descriptions,
         countries: m.countries, ageMin: m.age_min, ageMax: m.age_max, interests: m.interests,
       };
       try {
-        const ids = await launchMetaAd(s.access_token, s.ad_account_id, s.page_id, spec);
-        for (const id of [ids.campaignId, ids.adsetId, ids.adId]) await setMetaStatus(s.access_token, id, 'ACTIVE');
-        return { status: 'done', detail: `Launched on Meta at $${(spec.dailyBudgetCents / 100).toFixed(2)}/day (campaign ${ids.campaignId}).`, store: { meta_ids: ids } };
+        const ids = await provider.launch(s, spec);
+        await provider.setStatus(s, ids, 'ACTIVE');
+        return { status: 'done', detail: `Launched on ${def.label} at $${(spec.dailyBudgetCents / 100).toFixed(2)}/day (campaign ${ids.campaignId}).`, store: { meta_ids: ids } };
       } catch (e: any) {
-        return { status: 'failed', detail: `Meta launch failed: ${String(e?.message || e)}` };
+        return { status: 'failed', detail: `${def.label} launch failed: ${String(e?.message || e)}` };
       }
     }
     if (emailish && smtp?.connected) return await sendEmail(smtp, action) as any;

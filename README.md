@@ -26,8 +26,10 @@ reload or a full server restart.
   inside hard budget caps + a kill switch. The content pipeline refills itself.
 - **Native posting** to X, LinkedIn, Reddit, and Mastodon via official OAuth; an
   automation-webhook bridge for everything else.
-- **Autonomous Meta ad spend** with a total cap, daily cap, kill switch, and
-  per-ad pause/resume/remove — polled in the background so spend stays in bounds.
+- **Autonomous ad spend across Meta, Google & Reddit** (one shared provider
+  layer) with a total cap, daily cap, kill switch, an optimizer that pauses
+  losers, and per-ad pause/resume/remove — polled in the background so spend
+  stays in bounds.
 - **Email outreach** with named recipient lists, CSV import, a per-project
   suppression/unsubscribe set, and `{{first_name}}`/`{{company}}` merge tokens.
 - **Steer it in plain English**: a project-level *Direction & ideas* box shapes
@@ -96,19 +98,36 @@ no further clicks — within the rails you set:
 A live status banner shows scheduled-post count, the next publish time, live-ad
 count, and whether agents are currently generating.
 
-### Autonomous paid ads (Meta)
+### Autonomous paid ads (Meta · Google · Reddit)
 
-Connect a Meta ad account and approved (or auto-approved) ad actions launch real
-campaigns via the Marketing API:
+Paid channels share one provider abstraction ([lib/adproviders.ts](lib/adproviders.ts)),
+so the budget caps, autonomy modes, spend-sync, optimizer, and per-ad controls
+work identically across all of them. Connect an ad account and approved (or
+auto-approved) ad actions launch real, initially-paused campaigns, then activate:
+
+- **Meta Ads** — Marketing API (Facebook/Instagram). Single headline + creative image.
+- **Google Ads** — responsive search ads (3–15 headlines, 2–4 descriptions). Needs
+  a developer token + customer id.
+- **Reddit Ads** — promoted link posts. Reddit's Ads API is approval-gated.
+
+Shared behavior:
 
 - **Fund / defund** the campaign budget; **total cap** + **daily cap** are hard
-  limits enforced by a background poller that syncs real spend from Meta.
+  limits enforced by a background poller that syncs real spend from each platform.
 - **Autonomy modes**: approve every ad · approve the first then auto · fully
   autonomous · auto-optimize only.
+- **Optimizer** pulls per-ad CTR/clicks/impressions/spend and auto-pauses ads that
+  burn money with no traction (dead spend, or sub-floor CTR after a fair test).
 - **Per-ad controls**: pause, resume, or remove any live ad. Removing deletes the
-  underlying Meta campaign; the kill switch pauses everything at once.
+  underlying platform campaign; the kill switch pauses everything at once.
 - Spend is always on **your** ad account with **your** billing — the app never
   holds or escrows money.
+
+> **Live-test gate.** Meta, Google, and Reddit ad code is written to each
+> platform's documented API but, like any paid integration, must be validated
+> against a real, approved account. Google Ads needs an approved developer token;
+> Reddit Ads needs Reddit to grant your account API access. Connect, then we
+> verify the first live launch together.
 
 ### Per-project connections
 
@@ -140,7 +159,7 @@ Approved actions execute via the best connected **connector**:
 | Executor | What it does |
 |----------|--------------|
 | **Native API (X / LinkedIn / Reddit / Mastodon)** | OAuth "Connect" — the app posts directly via the official API, auto-threading long copy and refreshing expired tokens. Mastodon self-registers (no dev portal); X, LinkedIn & Reddit need a one-time developer app (paste a client id/secret — the UI shows the exact redirect URI + portal link). Reddit posts need a target subreddit (the agent includes one, or add `r/...` to the action). No Zapier needed. |
-| **Meta Ads (Marketing API)** | OAuth "Connect" — launches real ad campaigns on your ad account, syncs spend, and auto-pauses at caps. Requires Business Verification + App Review for `ads_management` (Advanced access) and an ad account with billing. |
+| **Paid ads (Meta / Google / Reddit)** | OAuth "Connect" — launches real ad campaigns on your ad account, syncs spend, optimizes, and auto-pauses at caps. Meta needs Business Verification + App Review; Google needs a developer token + customer id; Reddit Ads API access is approval-gated. |
 | **Email (SMTP)** | Really sends approved outreach/lifecycle email to your lists (opt-out footer + suppression enforced). |
 | **Automation webhook** | POSTs the action to your Zapier / Make / n8n / Buffer hook — the universal bridge to publish anywhere. |
 | **Manual / publish-ready** | No connector for that channel yet → the action is marked ready with copy-paste content. Nothing is faked as "posted". |
@@ -209,7 +228,10 @@ variables are optional and documented in [.env.example](.env.example).
 | `lib/agent.ts` | Agent SDK runner + custom tools + research/marketing/execution/revision prompts |
 | `lib/connectors.ts` | Channel catalog + execution adapters (native API / Meta ads / SMTP / webhook / manual) |
 | `lib/oauth.ts` | OAuth flows for X, LinkedIn, Reddit, Mastodon (PKCE, token refresh, posting) |
+| `lib/adproviders.ts` | Uniform ad-provider interface + registry (Meta / Google / Reddit) |
 | `lib/meta.ts` | Meta Marketing API: OAuth, campaign/adset/creative/ad creation, insights, status |
+| `lib/google.ts` | Google Ads API: OAuth + refresh, responsive-search-ad launch, insights, status |
+| `lib/redditads.ts` | Reddit Ads API (v3): OAuth, campaign/ad-group/ad launch, reports, status |
 | `lib/pdf.ts` | PDF report rendering (pdfkit) |
 
 ## Contributing

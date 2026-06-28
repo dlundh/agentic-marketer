@@ -7,6 +7,8 @@ import {
   exchangeLinkedinCode, verifyLinkedinAccount,
 } from '@/lib/oauth';
 import { exchangeMetaCode, listAdAccounts, listPages } from '@/lib/meta';
+import { exchangeGoogleCode } from '@/lib/google';
+import { exchangeRedditAdsCode, listRedditAdAccounts } from '@/lib/redditads';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -58,6 +60,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ provider
       const accounts = await listAdAccounts(token).catch(() => []);
       const pages = await listPages(token).catch(() => []);
       save({ client_id: s.client_id, client_secret: s.client_secret, access_token: token, ad_account_id: accounts[0]?.id || '', page_id: pages[0]?.id || '', accounts, pages, handle: accounts[0]?.name || 'Meta ad account' });
+      return back('connected');
+    }
+    if (provider === 'google_ads') {
+      const { access_token, refresh_token } = await exchangeGoogleCode(s.client_id, s.client_secret, code, s.redirect_uri);
+      // access_token is short-lived; refresh_token is what we persist + re-exchange.
+      save({ client_id: s.client_id, client_secret: s.client_secret, access_token, refresh_token, developer_token: s.developer_token, customer_id: s.customer_id, login_customer_id: s.login_customer_id, handle: `Google Ads ${s.customer_id}` });
+      return back('connected');
+    }
+    if (provider === 'reddit_ads') {
+      const { access_token, refresh_token } = await exchangeRedditAdsCode(s.client_id, s.client_secret, code, s.redirect_uri);
+      const accounts = await listRedditAdAccounts({ ...s, access_token, refresh_token }).catch(() => []);
+      save({ client_id: s.client_id, client_secret: s.client_secret, access_token, refresh_token, ad_account_id: accounts[0]?.id || '', accounts, handle: accounts[0]?.name || 'Reddit ad account' });
       return back('connected');
     }
     return back('error');

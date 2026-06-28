@@ -65,10 +65,14 @@ export async function listPages(token: string): Promise<{ id: string; name: stri
 }
 
 // ---- Campaign structure ---------------------------------------------------
+// Shared across ad providers (Meta / Google / Reddit). Providers use the subset
+// they need: Meta wants a single headline + image; Google responsive search ads
+// want headlines[]/descriptions[]; all want a link + daily budget.
 export type AdSpec = {
   name: string; objective?: string; dailyBudgetCents: number;
   message: string; headline: string; description?: string; link: string;
   imageUrl?: string; cta?: string;
+  headlines?: string[]; descriptions?: string[];      // Google responsive search ads
   countries?: string[]; ageMin?: number; ageMax?: number; interests?: string[];
 };
 
@@ -127,3 +131,24 @@ export async function campaignInsights(token: string, campaignId: string): Promi
   const row = (j.data || [])[0] || {};
   return { spendCents: Math.round(parseFloat(row.spend || '0') * 100), impressions: +(row.impressions || 0), clicks: +(row.clicks || 0) };
 }
+
+// ---- Provider adapter (uniform across Meta / Google / Reddit) --------------
+// See lib/adproviders.ts for the shared AdProvider shape + registry.
+import type { AdProvider } from './adproviders';
+export const metaProvider: AdProvider = {
+  key: 'meta_ads', label: 'Meta Ads',
+  async launch(s, spec) {
+    if (!s?.ad_account_id || !s?.page_id) throw new Error('Pick your Meta ad account and Page under ⚙ Channels first.');
+    if (!spec.imageUrl) throw new Error('Meta ads need a creative image — add one to the action or set a default image URL.');
+    return await launchMetaAd(s.access_token, s.ad_account_id, s.page_id, spec);
+  },
+  async setStatus(s, ids, status) {
+    // Pausing the campaign stops all spend; resuming must re-activate every entity.
+    if (status === 'PAUSED') { if (ids.campaignId) await setMetaStatus(s.access_token, ids.campaignId, 'PAUSED'); return; }
+    for (const id of [ids.campaignId, ids.adsetId, ids.adId]) if (id) await setMetaStatus(s.access_token, id, 'ACTIVE');
+  },
+  async remove(s, ids) { if (ids.campaignId) await deleteMetaEntity(s.access_token, ids.campaignId); },
+  async insights(s, ids) {
+    return ids.campaignId ? campaignInsights(s.access_token, ids.campaignId) : { spendCents: 0, impressions: 0, clicks: 0 };
+  },
+};

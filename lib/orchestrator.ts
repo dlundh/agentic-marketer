@@ -9,6 +9,7 @@ import {
 import { emitEvent } from './events';
 import { runAgent, runRevision, runAccountKit, ROLE_LABELS } from './agent';
 import { runAction, channelDef, CHANNELS, isAutoExecutable, autoChannels } from './connectors';
+import { adProvider, adSecrets } from './adproviders';
 
 // ---------------------------------------------------------------------------
 // Owns the lifecycle of every job. Holds an AbortController per running job so
@@ -272,20 +273,19 @@ export function setAutoPosts(projectId: string, on: boolean) {
 export async function setKillSwitch(projectId: string, paused: boolean) {
   const c = getCampaignByProject(projectId); if (!c) return false;
   updateCampaign(c.id, { status: paused ? 'paused' : 'active' });
-  if (paused) await pauseLiveMetaAds(projectId, c.id);  // stop real spend immediately
+  if (paused) await pauseAllLiveAds(projectId, c.id);  // stop real spend immediately, every provider
   emitEvent({ type: 'project', projectId });
   if (!paused) autoApproveAds(projectId);
   return true;
 }
 
-async function pauseLiveMetaAds(projectId: string, campaignId: string) {
-  const meta = getConnector(projectId, 'meta_ads');
-  const s = meta?.connected && meta.secrets ? JSON.parse(meta.secrets) : null;
-  if (!s?.access_token) return;
-  const { setMetaStatus } = await import('./meta');
+// Pause every live ad across all providers (Meta / Google / Reddit) for a campaign.
+async function pauseAllLiveAds(projectId: string, campaignId: string) {
   for (const a of listActions(campaignId).filter((x) => x.kind === 'ad' && x.status === 'done')) {
-    const ids = (a.meta ? JSON.parse(a.meta) : {}).meta_ids;
-    if (ids?.campaignId) { try { await setMetaStatus(s.access_token, ids.campaignId, 'PAUSED'); } catch { /* best effort */ } }
+    const provider = adProvider(a.channel); if (!provider) continue;
+    const s = adSecrets(projectId, a.channel); if (!s?.access_token) continue;
+    const ids = parseMeta(a.meta).meta_ids;
+    if (ids?.campaignId) { try { await provider.setStatus(s, ids, 'PAUSED'); } catch { /* best effort */ } }
   }
 }
 
@@ -448,39 +448,41 @@ const AD_DEAD_SPEND_CENTS = 1500;   // ≥ $15 spent with zero clicks = dead, pa
 // had a fair test but are clearly underperforming. Safe to call on a schedule.
 export async function runAdOptimizer(projectId: string) {
   const c = getCampaignByProject(projectId); if (!c) return;
-  const meta = getConnector(projectId, 'meta_ads');
-  const s = meta?.connected && meta.secrets ? JSON.parse(meta.secrets) : null;
-  if (s?.access_token) {
-    const { campaignInsights } = await import('./meta');
-    const optimize = c.autonomy !== 'approval'; // manual mode still gets cap-safety, just no auto-pause
-    let total = 0;
-    for (const a of listActions(c.id).filter((x) => x.kind === 'ad' && x.status === 'done')) {
-      const m = a.meta ? JSON.parse(a.meta) : {};
-      const ids = m.meta_ids;
-      if (!ids?.campaignId) continue;
-      let ins;
-      try { ins = await campaignInsights(s.access_token, ids.campaignId); } catch { continue; }
-      total += ins.spendCents;
-      if (m.ad_paused) continue; // already off — counted for spend, skip judgement
-      // Evaluate this ad. CTR = clicks / impressions.
-      const ctr = ins.impressions > 0 ? ins.clicks / ins.impressions : 0;
-      const dead = ins.spendCents >= AD_DEAD_SPEND_CENTS && ins.clicks === 0;
-      const weak = ins.spendCents >= AD_MIN_SPEND_CENTS && ins.impressions >= AD_MIN_IMPRESSIONS && ctr < AD_CTR_FLOOR;
-      if (optimize && (dead || weak)) {
-        const why = dead
-          ? `Auto-paused: spent $${(ins.spendCents / 100).toFixed(2)} with 0 clicks.`
-          : `Auto-paused: CTR ${(ctr * 100).toFixed(2)}% below ${(AD_CTR_FLOOR * 100).toFixed(1)}% floor after ${ins.impressions.toLocaleString()} impressions ($${(ins.spendCents / 100).toFixed(2)} spent).`;
-        try {
-          const { setMetaStatus } = await import('./meta');
-          await setMetaStatus(s.access_token, ids.campaignId, 'PAUSED');
-          updateAction(a.id, { meta: JSON.stringify({ ...m, ad_paused: true, paused_reason: why }), result: why });
-        } catch { /* try again next cycle */ }
-      } else {
-        // Keep a fresh performance snapshot on the action for the UI.
-        const perf = { spend_cents: ins.spendCents, impressions: ins.impressions, clicks: ins.clicks, ctr };
-        if (JSON.stringify(m.perf) !== JSON.stringify(perf)) updateAction(a.id, { meta: JSON.stringify({ ...m, perf }) });
-      }
+  const optimize = c.autonomy !== 'approval'; // manual mode still gets cap-safety, just no auto-pause
+  const liveAds = listActions(c.id).filter((x) => x.kind === 'ad' && x.status === 'done');
+  if (!liveAds.length) { emitEvent({ type: 'project', projectId }); return; }
+  let total = 0;
+  let synced = false;
+  for (const a of liveAds) {
+    const provider = adProvider(a.channel); if (!provider) continue;
+    const s = adSecrets(projectId, a.channel); if (!s?.access_token) continue;
+    const m = parseMeta(a.meta);
+    const ids = m.meta_ids;
+    if (!ids?.campaignId) continue;
+    let ins;
+    try { ins = await provider.insights(s, ids); } catch { continue; }
+    synced = true;
+    total += ins.spendCents;
+    if (m.ad_paused) continue; // already off — counted for spend, skip judgement
+    // Evaluate this ad. CTR = clicks / impressions.
+    const ctr = ins.impressions > 0 ? ins.clicks / ins.impressions : 0;
+    const dead = ins.spendCents >= AD_DEAD_SPEND_CENTS && ins.clicks === 0;
+    const weak = ins.spendCents >= AD_MIN_SPEND_CENTS && ins.impressions >= AD_MIN_IMPRESSIONS && ctr < AD_CTR_FLOOR;
+    if (optimize && (dead || weak)) {
+      const why = dead
+        ? `Auto-paused: spent $${(ins.spendCents / 100).toFixed(2)} with 0 clicks.`
+        : `Auto-paused: CTR ${(ctr * 100).toFixed(2)}% below ${(AD_CTR_FLOOR * 100).toFixed(1)}% floor after ${ins.impressions.toLocaleString()} impressions ($${(ins.spendCents / 100).toFixed(2)} spent).`;
+      try {
+        await provider.setStatus(s, ids, 'PAUSED');
+        updateAction(a.id, { meta: JSON.stringify({ ...m, ad_paused: true, paused_reason: why }), result: why });
+      } catch { /* try again next cycle */ }
+    } else {
+      // Keep a fresh performance snapshot on the action for the UI.
+      const perf = { spend_cents: ins.spendCents, impressions: ins.impressions, clicks: ins.clicks, ctr };
+      if (JSON.stringify(m.perf) !== JSON.stringify(perf)) updateAction(a.id, { meta: JSON.stringify({ ...m, perf }) });
     }
+  }
+  if (synced) {
     setSpend(c.id, total);
     if (c.budget_cents > 0 && total >= c.budget_cents) await setKillSwitch(projectId, true); // hard stop at the cap
   }
@@ -558,7 +560,6 @@ export async function approveAction(actionId: string, opts: { list_id?: string }
 }
 
 const parseMeta = (m: string | null) => { try { return m ? JSON.parse(m) : {}; } catch { return {}; } };
-const metaSecrets = (projectId: string) => { const c = getConnector(projectId, 'meta_ads'); return c?.connected && c.secrets ? JSON.parse(c.secrets) : null; };
 
 // Sum of the daily budgets of currently-live (not paused) ad actions.
 export function committedDailyCents(campaignId: string): number {
@@ -567,13 +568,13 @@ export function committedDailyCents(campaignId: string): number {
     .reduce((s, x) => s + x.cost_cents, 0);
 }
 
-// Per-ad controls (each ad action = its own Meta campaign).
+// Per-ad controls (each ad action = its own platform campaign on its channel).
 export async function pauseAd(actionId: string): Promise<{ ok: boolean; error?: string }> {
   const a = getAction(actionId);
   if (!a || a.kind !== 'ad' || a.status !== 'done') return { ok: false, error: 'Not a live ad.' };
-  const meta = parseMeta(a.meta); const s = metaSecrets(a.project_id);
-  if (s?.access_token && meta.meta_ids?.campaignId) {
-    try { const { setMetaStatus } = await import('./meta'); await setMetaStatus(s.access_token, meta.meta_ids.campaignId, 'PAUSED'); }
+  const meta = parseMeta(a.meta); const provider = adProvider(a.channel); const s = adSecrets(a.project_id, a.channel);
+  if (provider && s?.access_token && meta.meta_ids?.campaignId) {
+    try { await provider.setStatus(s, meta.meta_ids, 'PAUSED'); }
     catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
   }
   updateAction(actionId, { meta: JSON.stringify({ ...meta, ad_paused: true }) });
@@ -585,12 +586,10 @@ export async function resumeAd(actionId: string): Promise<{ ok: boolean; error?:
   if (!a || a.kind !== 'ad' || a.status !== 'done') return { ok: false, error: 'Not a paused ad.' };
   const block = adSpendBlock(getCampaign(a.campaign_id), a.cost_cents);
   if (block) return { ok: false, error: block };
-  const meta = parseMeta(a.meta); const s = metaSecrets(a.project_id);
-  if (s?.access_token && meta.meta_ids) {
-    try {
-      const { setMetaStatus } = await import('./meta');
-      for (const id of [meta.meta_ids.campaignId, meta.meta_ids.adsetId, meta.meta_ids.adId]) if (id) await setMetaStatus(s.access_token, id, 'ACTIVE');
-    } catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
+  const meta = parseMeta(a.meta); const provider = adProvider(a.channel); const s = adSecrets(a.project_id, a.channel);
+  if (provider && s?.access_token && meta.meta_ids) {
+    try { await provider.setStatus(s, meta.meta_ids, 'ACTIVE'); }
+    catch (e: any) { return { ok: false, error: String(e?.message || e) }; }
   }
   updateAction(actionId, { meta: JSON.stringify({ ...meta, ad_paused: false }) });
   emitEvent({ type: 'finding', projectId: a.project_id });
@@ -599,11 +598,11 @@ export async function resumeAd(actionId: string): Promise<{ ok: boolean; error?:
 export async function removeAd(actionId: string): Promise<{ ok: boolean; error?: string }> {
   const a = getAction(actionId);
   if (!a || a.kind !== 'ad') return { ok: false, error: 'Not an ad.' };
-  const meta = parseMeta(a.meta); const s = metaSecrets(a.project_id);
-  if (s?.access_token && meta.meta_ids?.campaignId) {
-    try { const { deleteMetaEntity } = await import('./meta'); await deleteMetaEntity(s.access_token, meta.meta_ids.campaignId); } catch { /* best effort */ }
+  const meta = parseMeta(a.meta); const provider = adProvider(a.channel); const s = adSecrets(a.project_id, a.channel);
+  if (provider && s?.access_token && meta.meta_ids?.campaignId) {
+    try { await provider.remove(s, meta.meta_ids); } catch { /* best effort */ }
   }
-  updateAction(actionId, { status: 'rejected', result: 'Ad removed from Meta.' });
+  updateAction(actionId, { status: 'rejected', result: `Ad removed from ${channelDef(a.channel).label}.` });
   emitEvent({ type: 'finding', projectId: a.project_id });
   return { ok: true };
 }

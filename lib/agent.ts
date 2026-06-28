@@ -147,8 +147,10 @@ function buildTools(job: Job, outcome: RunOutcome) {
       targeting: z.string().optional().describe('Audience / targeting / community + posting norms'),
       schedule: z.string().optional().describe('When to publish (e.g. "Tue 9am", "launch day")'),
       rationale: z.string().optional().describe('Why this is high-leverage for the budget'),
-      image_url: z.string().optional().describe('REQUIRED for ads: a public image URL for the creative (app icon, screenshot, or site OG image). Meta ads fail without one.'),
+      image_url: z.string().optional().describe('REQUIRED for Meta/Reddit ads: a public image URL for the creative (app icon, screenshot, or site OG image). Meta ads fail without one.'),
       headline: z.string().optional().describe('Short ad headline (for ads)'),
+      headlines: z.array(z.string()).optional().describe('REQUIRED for google_ads: 3–15 distinct short headlines, each ≤30 chars (responsive search ad).'),
+      descriptions: z.array(z.string()).optional().describe('REQUIRED for google_ads: 2–4 distinct descriptions, each ≤90 chars (responsive search ad).'),
       link: z.string().optional().describe('Destination URL for ads (defaults to the product URL)'),
     },
     async (args) => {
@@ -163,7 +165,8 @@ function buildTools(job: Job, outcome: RunOutcome) {
         content: args.content, cost_cents: cost,
         meta: { recipients: args.recipients, subject: args.subject, targeting: args.targeting,
                 schedule: args.schedule, rationale: args.rationale, overBudget,
-                image_url: args.image_url, headline: args.headline, link: args.link },
+                image_url: args.image_url, headline: args.headline, headlines: args.headlines,
+                descriptions: args.descriptions, link: args.link },
       });
       log(job, 'action', `${channelDef(args.channel).label} · ${args.kind}${cost ? ` · $${(cost / 100).toFixed(2)}` : ''}`, args.title);
       emitEvent({ type: 'finding', projectId, jobId: job.id });
@@ -329,7 +332,10 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
     ads: [
       `YOUR ROLE — Paid Advertising (strictly budget-bound):`,
       `Call check_budget first. Design paid experiments for your in-scope channels that fit the remaining budget. If budget is low/zero, first search the web for current free ad credits/coupons (Google Ads, Microsoft Advertising, Meta, etc.) and propose $0 or minimal-cost tests. For each experiment use propose_action kind "ad" with the hook + primary text in \`content\`, audience in \`targeting\`, and a realistic cost_usd (this is the DAILY budget for the ad).`,
-      `EVERY ad MUST include: a short \`headline\`, a destination \`link\`, and an \`image_url\` — a PUBLIC image for the creative. Use WebFetch on the product page to find a real image URL (app icon, screenshot, or OG image); Meta ads FAIL to launch without an image. For \`link\`, use a WEBSITE landing page — NOT an App Store / Google Play URL (Meta only allows app-store links with its App Installs objective). The SUM of your proposed daily ad budgets must stay within the remaining budget.`,
+      `EVERY ad needs a destination \`link\` — a WEBSITE landing page, NOT an App Store / Google Play URL (Meta only allows app-store links with its App Installs objective). Per platform:`,
+      `  • meta_ads / reddit_ads: include a short \`headline\` AND an \`image_url\` — a PUBLIC image (app icon, screenshot, or OG image; use WebFetch on the product page to find a real one). These FAIL to launch without an image.`,
+      `  • google_ads (responsive search ads): include \`headlines\` (3–15 distinct, each ≤30 chars) and \`descriptions\` (2–4 distinct, each ≤90 chars). No image needed.`,
+      `The SUM of your proposed daily ad budgets must stay within the remaining budget.`,
     ].join('\n'),
     influencer: [
       `YOUR ROLE — Influencer & Creator Outreach:`,

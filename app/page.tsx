@@ -1209,12 +1209,17 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
   const [instance, setInstance] = useState('mastodon.social');
   const [cid, setCid] = useState('');
   const [csec, setCsec] = useState('');
+  const [gDevToken, setGDevToken] = useState('');   // Google Ads developer token
+  const [gCustomer, setGCustomer] = useState('');   // Google Ads customer id
   const [webhookMode, setWebhookMode] = useState(false);
-  const isOAuth = ['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads'].includes(c.key);
+  const isOAuth = ['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads', 'google_ads', 'reddit_ads'].includes(c.key);
+  const isGoogleAds = c.key === 'google_ads';
   const redirectUri = (typeof window !== 'undefined' ? window.location.origin : '') + `/api/oauth/${c.key}/callback`;
   const portal = c.key === 'x' ? 'https://developer.twitter.com/en/portal/dashboard'
     : c.key === 'linkedin' ? 'https://www.linkedin.com/developers/apps'
     : c.key === 'meta_ads' ? 'https://developers.facebook.com/apps'
+    : c.key === 'google_ads' ? 'https://console.cloud.google.com/apis/credentials'
+    : c.key === 'reddit_ads' ? 'https://www.reddit.com/prefs/apps'
     : 'https://www.reddit.com/prefs/apps';
 
   const startOAuth = async (payload: any) => {
@@ -1290,11 +1295,21 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
                 {c.key === 'x' ? 'Open X developer portal ↗ — create an app, enable OAuth 2.0 (Web App / confidential), scopes incl. tweet.write'
                   : c.key === 'linkedin' ? 'Open LinkedIn developer portal ↗ — create an app, add the “Sign In with LinkedIn using OpenID Connect” + “Share on LinkedIn” products, set the redirect URL above, then copy the Client ID/Secret from the Auth tab'
                   : c.key === 'meta_ads' ? 'Open Meta for Developers ↗ — create a Business app, add Marketing API + Facebook Login, set this redirect as a valid OAuth URI, then paste App ID/Secret. NOTE: real spend needs Business Verification + App Review for ads_management (Advanced access) + an ad account with billing.'
+                  : c.key === 'google_ads' ? 'Open Google Cloud Credentials ↗ — create an OAuth client (Web app) with the redirect above and the AdWords scope. NOTE: real spend also needs a Google Ads API developer token (Basic access, applied for in the Ads API Center) + your customer id + an account with billing.'
+                  : c.key === 'reddit_ads' ? 'Open Reddit apps ↗ — create a "web app" with the redirect above. NOTE: the Reddit Ads API is approval-gated — your ad account needs API access granted by Reddit.'
                   : 'Open Reddit apps ↗ — create a "web app", set the redirect URI above'}
               </a>
               <input className="field" placeholder="Client ID" value={cid} onChange={(e) => setCid(e.target.value)} />
               <input className="field" type="password" placeholder="Client Secret" value={csec} onChange={(e) => setCsec(e.target.value)} />
-              <button className="approve" onClick={() => startOAuth({ client_id: cid.trim(), client_secret: csec.trim() })} disabled={busy || !cid.trim() || !csec.trim()}>
+              {isGoogleAds && (
+                <>
+                  <input className="field" type="password" placeholder="Developer token" value={gDevToken} onChange={(e) => setGDevToken(e.target.value)} />
+                  <input className="field" placeholder="Customer ID (e.g. 123-456-7890)" value={gCustomer} onChange={(e) => setGCustomer(e.target.value)} />
+                </>
+              )}
+              <button className="approve" onClick={() => startOAuth(isGoogleAds
+                ? { client_id: cid.trim(), client_secret: csec.trim(), developer_token: gDevToken.trim(), customer_id: gCustomer.trim() }
+                : { client_id: cid.trim(), client_secret: csec.trim() })} disabled={busy || !cid.trim() || !csec.trim() || (isGoogleAds && (!gDevToken.trim() || !gCustomer.trim()))}>
                 {busy ? <span className="spin">⟳</span> : `Connect with ${c.label} ↗`}
               </button>
               <button className="mini" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => { setWebhookMode(true); setMsg(null); }}>Can’t make a dev app? Use a webhook (Make / Zapier / n8n) instead →</button>
