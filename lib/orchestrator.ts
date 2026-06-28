@@ -261,7 +261,10 @@ export function setAutonomy(projectId: string, mode: string) {
 export function setAutoPosts(projectId: string, on: boolean) {
   const c = getCampaignByProject(projectId); if (!c) return false;
   updateCampaign(c.id, { auto_posts: on ? 1 : 0 });
-  if (on) scheduleProposedPosts(projectId); // queue everything already waiting
+  if (on) {
+    scheduleProposedPosts(projectId); // queue everything already waiting…
+    refillScheduledPosts(projectId);  // …and start generating now if the pipeline is thin
+  }
   emitEvent({ type: 'project', projectId });
   return true;
 }
@@ -397,7 +400,7 @@ async function publishDuePosts() {
 // Keep a rolling content pipeline: when a full-auto project's upcoming post
 // queue runs low (and no swarm job is mid-flight), spawn the post-producing
 // specialists again so it keeps publishing over time instead of going quiet.
-const MIN_QUEUED_POSTS = 3;
+const MIN_QUEUED_POSTS = 6;
 function refillScheduledPosts(projectId: string) {
   const c = getCampaignByProject(projectId);
   if (!c || c.status !== 'active' || !c.auto_posts) return;

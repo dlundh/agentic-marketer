@@ -696,12 +696,26 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
         </div>
         {campaign.budget_cents > 0 && <div className="meter"><div className="meter-fill" style={{ width: `${pct}%` }} /></div>}
         <AdControls campaign={campaign} onCampaignAction={onCampaignAction} liveAds={actions.filter((a) => a.kind === 'ad' && a.status === 'done' && !metaPaused(a)).length} />
-        <div className="note" style={{ fontSize: 12, marginTop: 8 }}>
-          {campaign.auto_posts
-            ? 'Organic posts are smart-scheduled & auto-published per channel. '
-            : 'Posts are approval-gated. '}
-          Ad spend follows your autonomy mode, always inside the total + daily caps and the kill switch. {anyExecLive && <span className="spin">⟳</span>} {anyExecLive && 'Agents are working…'}
-        </div>
+        {campaign.auto_posts ? (
+          <div className="auto-banner">
+            <div className="auto-banner-head">
+              <span className="fa-on">🤖 Autonomous marketing is ON</span>
+              {anyExecLive && <span className="auto-working"><span className="spin">⟳</span> agents generating…</span>}
+            </div>
+            <div className="auto-banner-stats">
+              <span>⏱ <b>{scheduled.length}</b> post{scheduled.length === 1 ? '' : 's'} scheduled</span>
+              {scheduled[0]?.scheduled_at && <span>· next publishes <b>{fmtWhen(scheduled[0].scheduled_at)}</b></span>}
+              <span>· <b>{actions.filter((a) => a.kind === 'ad' && a.status === 'done' && !metaPaused(a)).length}</b> live ad(s)</span>
+            </div>
+            <div className="note" style={{ fontSize: 11.5 }}>
+              Posts generate &amp; publish on their own at the best time per channel; ads auto-launch &amp; auto-pause on performance. The pipeline refills itself — no clicks needed. Caps + kill switch still apply. Email/influencer still need a list + your OK.
+            </div>
+          </div>
+        ) : (
+          <div className="note" style={{ fontSize: 12, marginTop: 8 }}>
+            Posts are approval-gated. Ad spend follows your autonomy mode, always inside the total + daily caps and the kill switch. {anyExecLive && <span className="spin">⟳</span>} {anyExecLive && 'Agents are working…'}
+          </div>
+        )}
       </div>
 
       <div className="queue">
