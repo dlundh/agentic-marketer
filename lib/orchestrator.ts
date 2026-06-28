@@ -1,5 +1,5 @@
 import {
-  createProject, createJob, updateJob, getJob, getProject, updateProject, listJobs,
+  createProject, createJob, updateJob, getJob, getProject, updateProject, deleteProject, listJobs,
   listFindings, listAllActiveJobs, createCampaign, getCampaign, getCampaignByProject,
   updateCampaign, getAction, updateAction, reserveSpend, refundSpend, resetStaleRevisions,
   addFunds, removeFunds, setSpend, listActions, getConnector, listActiveCampaigns,
@@ -7,7 +7,8 @@ import {
   type Job, type ActionRow, type Campaign,
 } from './db';
 import { emitEvent } from './events';
-import { runAgent, runRevision, runAccountKit, ROLE_LABELS } from './agent';
+import { rmSync } from 'node:fs';
+import { runAgent, runRevision, runAccountKit, ROLE_LABELS, projectDir } from './agent';
 import { runAction, channelDef, CHANNELS, isAutoExecutable, autoChannels } from './connectors';
 import { adProvider, adSecrets } from './adproviders';
 
@@ -159,6 +160,35 @@ export function resumeJob(jobId: string) {
   if (!job || running.has(jobId)) return false;
   if (!['paused', 'error', 'queued'].includes(job.status)) return false;
   drive(job, { resume: Boolean(job.session_id) });
+  return true;
+}
+
+// Pause/resume ALL autonomous activity for one marketing app: its campaign (so
+// scheduling, refills, publishing and ad spend stop / resume) plus any in-flight
+// agents. Other apps are unaffected — each campaign runs independently.
+export async function setProjectPaused(projectId: string, paused: boolean): Promise<boolean> {
+  if (!getProject(projectId)) return false;
+  const c = getCampaignByProject(projectId);
+  if (c) await setKillSwitch(projectId, paused); // campaign status + live ads + the auto loop
+  if (paused) {
+    for (const j of listJobs(projectId)) if (['running', 'queued'].includes(j.status)) pauseJob(j.id);
+  }
+  emitEvent({ type: 'project', projectId });
+  return true;
+}
+
+// Permanently delete a marketing app and ALL its data: stop in-flight agents,
+// wipe every DB row (connectors + cascaded jobs/findings/files/actions/campaign/
+// lists/directives), and remove its working directory (PDFs, attachments).
+export function removeProject(projectId: string): boolean {
+  if (!getProject(projectId)) return false;
+  for (const j of listJobs(projectId)) {
+    const entry = running.get(j.id);
+    if (entry) { entry.pausedByUser = true; entry.abort.abort(); running.delete(j.id); } // stop running agents
+  }
+  deleteProject(projectId);
+  try { rmSync(projectDir(projectId), { recursive: true, force: true }); } catch { /* dir may not exist */ }
+  emitEvent({ type: 'project', projectId });
   return true;
 }
 

@@ -260,6 +260,14 @@ export function updateProject(id: string, patch: Partial<Project>) {
   ).run(next.title, next.phase, next.status, next.summary ?? null, next.updated_at, id);
 }
 
+// Delete a project and ALL its data. jobs/findings/files/activity/campaigns/
+// actions/email_lists/recipients/suppressions/directives cascade via their FKs;
+// connectors lost their FK in the per-project migration, so remove them here too.
+export function deleteProject(id: string) {
+  db.prepare(`DELETE FROM connectors WHERE project_id=?`).run(id);
+  db.prepare(`DELETE FROM projects WHERE id=?`).run(id); // cascades the rest
+}
+
 export function createJob(j: { project_id: string; kind: string; title: string; phase?: string; params?: string }): Job {
   const id = uid('j_'); const t = now();
   db.prepare(

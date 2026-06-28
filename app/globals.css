@@ -151,6 +151,11 @@ a { color: var(--accent); }
 .hist { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .hist-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; cursor: pointer; transition: border-color .15s, transform .1s; }
 .hist-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.hist-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.hist-card-top .t { margin-bottom: 4px; }
+.hist-actions { display: flex; gap: 6px; flex-shrink: 0; opacity: 0; transition: opacity .12s; }
+.hist-card:hover .hist-actions { opacity: 1; }
+.paused-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--amber); background: rgba(245,177,76,.14); padding: 2px 6px; border-radius: 5px; }
 .hist-card .t { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
 .hist-card .d { color: var(--muted); font-size: 12.5px; line-height: 1.5; max-height: 54px; overflow: hidden; }
 .hist-card .foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; font-size: 12px; color: var(--muted); }

@@ -1,17 +1,25 @@
 import { NextResponse } from 'next/server';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { listProjects, listJobs, addFile } from '@/lib/db';
+import { listProjects, listJobs, addFile, getCampaignByProject } from '@/lib/db';
 import { createNewProject, launchJob, reconcile } from '@/lib/orchestrator';
 import { projectDir } from '@/lib/agent';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// List all projects (history) with their jobs.
+// List all projects (history) with their jobs + a pause/resume status hint.
 export async function GET() {
   reconcile(); // once: flip interrupted jobs (not in the live registry) to paused
-  const projects = listProjects().map((p) => ({ ...p, jobs: listJobs(p.id) }));
+  const projects = listProjects().map((p) => {
+    const jobs = listJobs(p.id);
+    const camp = getCampaignByProject(p.id);
+    return {
+      ...p, jobs,
+      campaign_status: camp?.status ?? null,                                   // 'active' | 'paused' | null (no campaign)
+      live: jobs.some((j) => ['running', 'queued'].includes(j.status)),        // an agent is mid-run
+    };
+  });
   return NextResponse.json({ projects });
 }
 

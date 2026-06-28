@@ -11,7 +11,7 @@ type Job = {
 type Activity = { id: string; kind: string; label: string | null; content: string | null; created_at: number };
 type Finding = { id: string; category: string | null; title: string; summary: string | null; details: string | null; job_id: string | null };
 type FileRow = { id: string; name: string; mime: string; size: number; kind: string | null; job_id: string | null };
-type Project = { id: string; title: string; prompt: string; url: string | null; phase: string; status: string; summary: string | null; updated_at: number; jobs?: Job[] };
+type Project = { id: string; title: string; prompt: string; url: string | null; phase: string; status: string; summary: string | null; updated_at: number; jobs?: Job[]; campaign_status?: string | null; live?: boolean };
 type Campaign = { id: string; status: string; currency: string; budget_cents: number; spent_cents: number; daily_cap_cents: number; channels: string | null; autonomy: string; auto_posts: number; strategy: string | null };
 type ActionItem = { id: string; channel: string; kind: string; title: string; summary: string | null; content: string | null; meta: string | null; cost_cents: number; status: string; scheduled_at?: number; result: string | null; job_id: string | null; auto?: boolean };
 type EmailList = { id: string; name: string; total?: number; active?: number };
@@ -133,6 +133,23 @@ export default function Page() {
   const control = async (jobId: string, action: 'pause' | 'resume') => {
     await fetch(`/api/jobs/${jobId}/${action}`, { method: 'POST' });
     if (currentId) loadDetail(currentId);
+    loadProjects();
+  };
+
+  // Pause / resume all autonomous activity for one app.
+  const pauseProject = async (projectId: string, paused: boolean) => {
+    await fetch(`/api/projects/${projectId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: paused ? 'pause' : 'resume' }),
+    });
+    if (currentId === projectId) loadDetail(projectId);
+    loadProjects();
+  };
+
+  // Permanently delete an app and all its data.
+  const deleteProject = async (projectId: string, title: string) => {
+    if (!window.confirm(`Delete “${title}” and ALL its data — connected channels, posts, ads, PDFs, history? This cannot be undone.`)) return;
+    await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+    if (currentId === projectId) { setCurrentId(null); }
     loadProjects();
   };
 
@@ -307,16 +324,29 @@ export default function Page() {
             <div className="empty">Nothing yet. Describe a product above to dispatch your first research agents.</div>
           ) : (
             <div className="hist">
-              {projects.map((p) => (
+              {projects.map((p) => {
+                const paused = p.campaign_status === 'paused';
+                const pausable = p.campaign_status === 'active' || p.live;
+                return (
                 <div key={p.id} className="hist-card" onClick={() => setCurrentId(p.id)}>
-                  <div className="t">{p.title}</div>
+                  <div className="hist-card-top">
+                    <div className="t">{p.title}</div>
+                    <div className="hist-actions" onClick={(e) => e.stopPropagation()}>
+                      {paused
+                        ? <button className="mini" title="Resume autonomous marketing for this app" onClick={() => pauseProject(p.id, false)}>▶ Resume</button>
+                        : pausable && <button className="mini" title="Pause all autonomous marketing for this app" onClick={() => pauseProject(p.id, true)}>⏸ Pause</button>}
+                      <button className="mini danger" title="Delete this app and all its data" onClick={() => deleteProject(p.id, p.title)}>🗑</button>
+                    </div>
+                  </div>
                   <div className="d">{p.summary || p.prompt}</div>
                   <div className="foot">
                     <PhaseChip phase={p.phase} />
+                    {paused && <span className="paused-tag">paused</span>}
                     <span>{(p.jobs?.length || 0)} job{(p.jobs?.length || 0) === 1 ? '' : 's'} · {ago(p.updated_at)}</span>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

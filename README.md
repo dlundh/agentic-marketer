@@ -144,13 +144,22 @@ Shared behavior:
 > Reddit Ads needs Reddit to grant your account API access. Connect, then we
 > verify the first live launch together.
 
-### Per-project connections
+### Per-project connections & independent apps
 
 Channels are connected **per project**, not globally. Each product you market
 keeps its own X/LinkedIn/Reddit/Mastodon/Meta/SMTP connections, so switching
 between products always posts and advertises through the correct accounts. Newly
 connected or re-activated channels are picked up dynamically on the next
 generation pass — no restart.
+
+Each app's campaign runs **independently**: switching to view a different app
+does not stop the others — the background loop schedules, refills and publishes
+for every active campaign. From the app list you can:
+- **⏸ Pause / ▶ Resume** an app — halts (or resumes) all of its autonomous
+  activity: scheduling, generation, publishing, and ad spend, plus any in-flight
+  agents. Other apps keep running.
+- **🗑 Delete** an app — permanently removes all of its data: connected channels,
+  posts, ads, findings, PDFs, history, and its working directory.
 
 ### Email lists & personalization
 

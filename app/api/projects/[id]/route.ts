@@ -3,10 +3,28 @@ import {
   getProject, listJobs, listFindings, listFiles, listActivity,
   getCampaignByProject, listActions, listEmailLists, listDirectives,
 } from '@/lib/db';
-import { isRunning, autonomousTick } from '@/lib/orchestrator';
+import { isRunning, autonomousTick, setProjectPaused, removeProject } from '@/lib/orchestrator';
 import { isAutoExecutable } from '@/lib/connectors';
 
 export const runtime = 'nodejs';
+
+// Pause / resume all autonomous activity for this app.
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const body = await req.json().catch(() => ({}));
+  if (body.action === 'pause' || body.action === 'resume') {
+    const ok = await setProjectPaused(id, body.action === 'pause');
+    return NextResponse.json({ ok }, { status: ok ? 200 : 404 });
+  }
+  return NextResponse.json({ error: 'unknown action' }, { status: 400 });
+}
+
+// Permanently delete this app and all its data.
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const ok = removeProject(id);
+  return NextResponse.json({ ok }, { status: ok ? 200 : 404 });
+}
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
