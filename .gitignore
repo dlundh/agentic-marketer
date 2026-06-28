@@ -9,3 +9,6 @@ next-env.d.ts
 
 # TS incremental build cache
 tsconfig.tsbuildinfo
+
+# Local HTTPS dev certs (mkcert / next --experimental-https)
+certificates
