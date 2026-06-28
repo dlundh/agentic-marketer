@@ -173,9 +173,13 @@ Optional: set `AGENT_MODEL` to pin a model (defaults to your Claude Code default
 
 ```bash
 npm install
-npm run dev      # http://localhost:4400
+cp .env.example .env.local   # optional — every variable is optional
+npm run dev                  # http://localhost:4400
 # or: npm run build && npm start
 ```
+
+Requires **Node 22.5+** (for the built-in `node:sqlite` module). All environment
+variables are optional and documented in [.env.example](.env.example).
 
 ## Persistence & resilience
 
@@ -207,6 +211,12 @@ npm run dev      # http://localhost:4400
 | `lib/oauth.ts` | OAuth flows for X, LinkedIn, Reddit, Mastodon (PKCE, token refresh, posting) |
 | `lib/meta.ts` | Meta Marketing API: OAuth, campaign/adset/creative/ad creation, insights, status |
 | `lib/pdf.ts` | PDF report rendering (pdfkit) |
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the
+pre-PR checklist, how to add a channel adapter, and the (non-negotiable) ethics
+guidelines.
 
 ## License
 
