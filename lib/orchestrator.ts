@@ -596,6 +596,12 @@ export async function approveAction(actionId: string, opts: { list_id?: string }
   if (res.store) { const meta = a.meta ? JSON.parse(a.meta) : {}; patch.meta = JSON.stringify({ ...meta, ...res.store }); }
   updateAction(actionId, patch);
   emitEvent({ type: 'finding', projectId: a.project_id });
+  // Publishing a post (manual "Publish now" or auto) drains the queue — keep the
+  // full-auto pipeline topped up so new posts get scheduled to replace it.
+  if (res.status !== 'failed' && a.kind !== 'ad' && getCampaign(a.campaign_id)?.auto_posts) {
+    scheduleProposedPosts(a.project_id);
+    refillScheduledPosts(a.project_id);
+  }
   return { ok: true, status: res.status, detail: res.detail };
 }
 
