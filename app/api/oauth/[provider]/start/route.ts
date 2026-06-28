@@ -20,7 +20,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ provide
   const body = await req.json().catch(() => ({}));
   const projectId = String(body.project_id || '');
   if (!projectId) return NextResponse.json({ error: 'No project selected.' }, { status: 400 });
-  const origin = new URL(req.url).origin;
+  // Behind a tunnel (ngrok/cloudflared) the request's own origin can resolve to
+  // http/localhost and mismatch what's registered with the provider. Prefer an
+  // explicit public URL so the redirect_uri is deterministic.
+  const pub = (process.env.OAUTH_PUBLIC_URL || process.env.APP_BASE_URL || '').trim().replace(/\/$/, '');
+  const origin = pub && !/localhost|127\.0\.0\.1/.test(pub) ? pub : new URL(req.url).origin;
   const redirectUri = `${origin}/api/oauth/${provider}/callback`;
   // Carry the project through the round-trip (the callback parses it back).
   const state = `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}__${projectId}`;

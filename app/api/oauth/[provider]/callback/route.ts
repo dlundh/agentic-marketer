@@ -18,7 +18,9 @@ export const maxDuration = 30;
 export async function GET(req: Request, { params }: { params: Promise<{ provider: string }> }) {
   const { provider } = await params;
   const u = new URL(req.url);
-  const origin = u.origin;
+  const pub = (process.env.OAUTH_PUBLIC_URL || process.env.APP_BASE_URL || '').trim().replace(/\/$/, '');
+  const origin = pub && !/localhost|127\.0\.0\.1/.test(pub) ? pub : u.origin; // land back on the public URL behind a tunnel
+
   const code = u.searchParams.get('code');
   const state = u.searchParams.get('state');
   const projectId = (state || '').split('__')[1] || '';
