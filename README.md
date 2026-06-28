@@ -97,6 +97,10 @@ no further clicks — within the rails you set:
 - **Self-refilling pipeline.** When the upcoming queue runs low and no agent is
   busy, the post-producing specialists respawn — reading your *live* connected
   channels each time — so it keeps generating and publishing indefinitely.
+- **Offline catch-up (no burst).** If the app is down past one or more scheduled
+  slots, it does *not* dump the backlog on restart: it publishes at most the
+  oldest overdue post per channel as catch-up and re-spaces the rest into upcoming
+  smart slots, so the account never looks like a spam burst.
 - **Autonomous ads.** Pending ads auto-launch, and the optimizer pulls per-ad
   CTR / clicks / impressions / spend on a schedule, auto-pausing ads that burn
   money with no traction (dead spend or sub-floor CTR after a fair test).

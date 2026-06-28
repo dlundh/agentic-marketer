@@ -406,14 +406,43 @@ export function scheduleProposedPosts(projectId: string) {
   if (queued) emitEvent({ type: 'project', projectId });
 }
 
-// Publish any organic posts whose scheduled time has arrived. Re-checks the
-// campaign is still active/full-auto (a kill switch or toggle-off cancels).
+// Publish posts whose scheduled slot has arrived. Re-checks the campaign is still
+// active/full-auto (a kill switch or toggle-off cancels).
+//
+// Offline-catch-up: if we were down and several posts are overdue, do NOT
+// burst-publish the backlog (that reads as spam and can get an account throttled).
+// Publish at most the OLDEST overdue post per channel as catch-up, and re-space
+// the rest into upcoming smart slots so they resume their natural cadence.
 async function publishDuePosts() {
-  for (const a of dueScheduledActions(Date.now())) {
+  const now = Date.now();
+  const due = dueScheduledActions(now); // status='scheduled' AND scheduled_at<=now, oldest first
+  if (!due.length) return;
+  const caughtUp = new Set<string>();          // `${campaignId}|${channel}` already published this run
+  const taken: Record<string, number[]> = {};  // same key -> times to space re-scheduled posts around
+  const touched = new Set<string>();            // project ids whose queue we re-spaced
+  for (const a of due) {
     const c = getCampaign(a.campaign_id);
     if (!c || c.status !== 'active' || !c.auto_posts) continue; // paused/kill-switched -> hold
-    try { await approveAction(a.id); } catch { /* leave it; retry next tick */ }
+    const key = `${a.campaign_id}|${a.channel}`;
+    if (!caughtUp.has(key)) {
+      caughtUp.add(key);
+      try { await approveAction(a.id); } catch { /* leave it; retry next tick */ }
+      continue;
+    }
+    // Backlog for this channel — push it to the next free FUTURE slot instead of
+    // publishing it now, so the overdue posts drip out rather than dumping.
+    if (!taken[key]) {
+      taken[key] = listActions(a.campaign_id)
+        .filter((x) => x.channel === a.channel && ((x.status === 'scheduled' && x.scheduled_at > now) || ['done', 'sent'].includes(x.status)))
+        .map((x) => (x.status === 'scheduled' ? x.scheduled_at : x.updated_at));
+      taken[key].push(now); // count the catch-up we just published
+    }
+    const slot = nextPostSlot(a.channel, taken[key]);
+    taken[key].push(slot);
+    scheduleAction(a.id, slot);
+    touched.add(a.project_id);
   }
+  for (const pid of touched) emitEvent({ type: 'project', projectId: pid });
 }
 
 // Keep a rolling content pipeline: when a full-auto project's upcoming post
