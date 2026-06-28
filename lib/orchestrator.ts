@@ -515,22 +515,29 @@ const AD_DEAD_SPEND_CENTS = 1500;   // ≥ $15 spent with zero clicks = dead, pa
 // Pull real spend + per-ad performance from Meta, update the ledger, hard-stop
 // at the cap, and (unless in manual 'approval' mode) auto-pause ads that have
 // had a fair test but are clearly underperforming. Safe to call on a schedule.
-export async function runAdOptimizer(projectId: string) {
-  const c = getCampaignByProject(projectId); if (!c) return;
+export type AdSyncResult = { ok: boolean; liveAds: number; synced: number; spentCents: number; issues: string[] };
+export async function runAdOptimizer(projectId: string): Promise<AdSyncResult> {
+  const c = getCampaignByProject(projectId);
+  if (!c) return { ok: false, liveAds: 0, synced: 0, spentCents: 0, issues: ['No campaign.'] };
   const optimize = c.autonomy !== 'approval'; // manual mode still gets cap-safety, just no auto-pause
   const liveAds = listActions(c.id).filter((x) => x.kind === 'ad' && x.status === 'done');
-  if (!liveAds.length) { emitEvent({ type: 'project', projectId }); return; }
+  const issues: string[] = [];
+  if (!liveAds.length) { emitEvent({ type: 'project', projectId }); return { ok: true, liveAds: 0, synced: 0, spentCents: c.spent_cents, issues }; }
   let total = 0;
-  let synced = false;
+  let synced = 0;
+  const disconnected = new Set<string>();
   for (const a of liveAds) {
-    const provider = adProvider(a.channel); if (!provider) continue;
-    const s = adSecrets(projectId, a.channel); if (!s?.access_token) continue;
+    const provider = adProvider(a.channel);
+    if (!provider) continue;
+    const s = adSecrets(projectId, a.channel);
+    if (!s?.access_token) { disconnected.add(channelDef(a.channel).label); continue; } // can't reach the platform
     const m = parseMeta(a.meta);
     const ids = m.meta_ids;
     if (!ids?.campaignId) continue;
     let ins;
-    try { ins = await provider.insights(s, ids); } catch { continue; }
-    synced = true;
+    try { ins = await provider.insights(s, ids); }
+    catch (e: any) { issues.push(`${channelDef(a.channel).label}: ${String(e?.message || e).slice(0, 200)}`); continue; }
+    synced++;
     total += ins.spendCents;
     if (m.ad_paused) continue; // already off — counted for spend, skip judgement
     // Evaluate this ad. CTR = clicks / impressions.
@@ -551,11 +558,13 @@ export async function runAdOptimizer(projectId: string) {
       if (JSON.stringify(m.perf) !== JSON.stringify(perf)) updateAction(a.id, { meta: JSON.stringify({ ...m, perf }) });
     }
   }
-  if (synced) {
+  if (synced > 0) {
     setSpend(c.id, total);
     if (c.budget_cents > 0 && total >= c.budget_cents) await setKillSwitch(projectId, true); // hard stop at the cap
   }
+  if (disconnected.size) issues.unshift(`${[...disconnected].join(', ')} ${disconnected.size === 1 ? 'is' : 'are'} not connected — reconnect under ⚙ Channels to sync real spend.`);
   emitEvent({ type: 'project', projectId });
+  return { ok: synced > 0 || liveAds.length === 0, liveAds: liveAds.length, synced, spentCents: synced > 0 ? total : c.spent_cents, issues };
 }
 
 // Spin up the optimizer on demand (after some actions exist / have run).

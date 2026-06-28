@@ -193,9 +193,15 @@ export default function Page() {
 
   const campaignAction = async (body: any) => {
     if (!currentId) return;
-    await fetch(`/api/projects/${currentId}/campaign`, {
+    const res = await fetch(`/api/projects/${currentId}/campaign`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    });
+    }).then((r) => r.json()).catch(() => ({}));
+    if (body.action === 'optimize_ads') {
+      setError(null); setNotice(null);
+      if (res.issues?.length) setError(`Spend sync: ${res.issues.join(' ')}`);
+      else if (!res.liveAds) setNotice('No live ads launched through the app to sync yet. (Boosted posts or ads created directly in Meta aren’t tracked here.)');
+      else setNotice(`Synced ${res.synced}/${res.liveAds} ad(s). Spend to date: $${((res.spentCents || 0) / 100).toFixed(2)}.`);
+    }
     loadDetail(currentId);
   };
 

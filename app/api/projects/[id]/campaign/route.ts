@@ -30,7 +30,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ ok: true });
     }
     case 'kill': return NextResponse.json({ ok: await setKillSwitch(id, !!body.paused) });
-    case 'optimize_ads': await runAdOptimizer(id); return NextResponse.json({ ok: true });
+    case 'optimize_ads': { const r = await runAdOptimizer(id); return NextResponse.json(r); }
   }
 
   // Launch a new campaign.
