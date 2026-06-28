@@ -6,3 +6,6 @@ data
 .DS_Store
 .env*.local
 next-env.d.ts
+
+# TS incremental build cache
+tsconfig.tsbuildinfo
