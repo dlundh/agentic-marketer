@@ -843,6 +843,7 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenL
         <span className="job-kind kind-exec">{chLabel(a.channel)} · {a.kind}</span>
         {a.cost_cents > 0 && <span className="cost">{usd(a.cost_cents)}</span>}
         <div className="action-title">{a.title}</div>
+        {meta.angle && <span className="angle-pill" title="Messaging angle — kept distinct from previous posts to avoid looking repetitive">🎯 {meta.angle}</span>}
         {a.status === 'proposed' && (auto
           ? <span className="auto-pill on" title="Approving this publishes it automatically">⚡ auto</span>
           : <span className="auto-pill off" title="Connect this channel to auto-publish">manual</span>)}

@@ -250,6 +250,7 @@ a { color: var(--accent); }
 .comp-title { font-size: 13px; font-weight: 600; }
 .comp-stat { font-size: 12px; color: var(--muted); }
 .comp-run { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.angle-pill { font-size: 10.5px; color: var(--accent); background: rgba(124,124,240,.12); border: 1px solid rgba(124,124,240,.25); padding: 2px 7px; border-radius: 6px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .fa-off { color: var(--muted); font-size: 11px; letter-spacing: .5px; }
 .adctl-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .adctl-stat { display: flex; flex-direction: column; gap: 1px; }

@@ -168,6 +168,7 @@ function buildTools(job: Job, outcome: RunOutcome) {
       title: z.string().describe('Short label for the queue'),
       summary: z.string().describe('One line: what this does and why'),
       content: z.string().describe('The actual ready-to-publish copy / script / ad text'),
+      angle: z.string().describe('A short label (3–6 words) for the messaging angle/hook/theme of THIS action, e.g. "founder origin story", "contrarian take on busywork", "time-saved ROI stat", "customer win story". MUST be distinct from the angles already used (listed in your context). Used to keep the account from looking repetitive/spammy.'),
       cost_usd: z.number().default(0).describe('Estimated spend in USD if executed (0 for organic)'),
       recipients: z.array(z.string()).optional().describe('Email recipients (only if the user already provided them; never invent addresses)'),
       subject: z.string().optional().describe('Email subject line'),
@@ -191,7 +192,7 @@ function buildTools(job: Job, outcome: RunOutcome) {
         channel: args.channel, kind: args.kind, title: args.title, summary: args.summary,
         content: args.content, cost_cents: cost,
         meta: { recipients: args.recipients, subject: args.subject, targeting: args.targeting,
-                schedule: args.schedule, rationale: args.rationale, overBudget,
+                schedule: args.schedule, rationale: args.rationale, overBudget, angle: args.angle,
                 image_url: args.image_url, headline: args.headline, headlines: args.headlines,
                 descriptions: args.descriptions, link: args.link },
       });
@@ -351,6 +352,7 @@ function tacticsPolicy(p: Project, budgetLine: string): string {
     `• APPROVAL-GATED: You PROPOSE actions with propose_action. Nothing is published or charged until a human approves it. Never claim you have already posted, sent, or spent anything.`,
     `• BUDGET: ${budgetLine} Call check_budget before proposing anything with a cost. Never let your proposed paid spend exceed the remaining budget. If the budget is $0, be relentlessly resourceful with free tactics; for paid channels, hunt for free ad credits/coupons and propose $0 or near-zero experiments.`,
     `• MAXIMIZE TRACTION PER DOLLAR with ingenious, high-leverage tactics tailored to THIS product's ideal customer.`,
+    `• VARIETY / ANTI-REPETITION (critical — repeated messaging makes accounts look like spam and gets them throttled or banned): study the "MESSAGING ALREADY PUBLISHED/QUEUED" list in your context and make EVERY new action genuinely fresh. Rotate the angle, hook, opening line, content structure (e.g. story vs. stat vs. question vs. how-to vs. hot take), length, and CTA. Never reuse a previous opener or template, never re-state the same value prop the same way. Set a distinct \`angle\` on each propose_action that is NOT in the already-used list. If you can't find a genuinely new angle for a channel, propose fewer actions rather than near-duplicates.`,
     `• ETHICS (hard limits): no spam, no fake accounts/followers/engagement, no fake reviews, no astroturfing, no bots that break platform ToS, no deceptive or misleading claims, no purchased email lists. Everything must be genuine and respect the audience. If a tactic would annoy people or risk an account ban, DO NOT propose it. Email must be opt-in friendly with a clear opt-out (CAN-SPAM/GDPR).`,
     `• CHANNEL-NATIVE & READY-TO-POST: each action's \`content\` must be EXACTLY what should appear on that channel, posted as-is. This is critical:`,
     `   – X / Twitter / Mastodon / Threads: write a real tweet, or a real tweet-thread where each idea is a natural tweet. Conversational and human. NO stage directions, NO production notes (no "Format:", "On-screen text:", "VO:", "B-roll", "HOOK (0–3s)"), and NO manual "(1/6)" numbering — threads are split automatically.`,
@@ -361,12 +363,33 @@ function tacticsPolicy(p: Project, budgetLine: string): string {
   ].join('\n');
 }
 
-function executionPrompt(p: Project, role: string, budgetLine: string, channelLabels: string, findings: string, existing: string[] = []): string {
+// Digest of the messaging we've already used (per in-scope action), so the swarm
+// can deliberately avoid repeating angles/hooks/openers and not look like spam.
+function messagingDigest(actions: ActionRow[]): { lines: string; angles: string[] } {
+  const meta = (m: string | null) => { try { return m ? JSON.parse(m) : {}; } catch { return {}; } };
+  // Only things that actually went out or are queued to (not rejected drafts),
+  // most-recent first, capped to keep the prompt lean.
+  const live = actions.filter((a) => ['done', 'sent', 'ready', 'scheduled', 'approved', 'proposed'].includes(a.status));
+  const recent = live.slice(-24).reverse();
+  const angles = new Set<string>();
+  const lines = recent.map((a) => {
+    const m = meta(a.meta);
+    if (m.angle) angles.add(String(m.angle).trim());
+    const opener = (a.content || a.summary || a.title || '').replace(/\s+/g, ' ').trim().slice(0, 90);
+    const angle = m.angle ? `angle "${m.angle}" — ` : '';
+    return `- [${a.channel}/${a.kind}] ${angle}“${opener}…”`;
+  }).join('\n');
+  return { lines, angles: [...angles] };
+}
+
+function executionPrompt(p: Project, role: string, budgetLine: string, channelLabels: string, findings: string, messaging = '', usedAngles: string[] = []): string {
   const head = tacticsPolicy(p, budgetLine);
   const scopeLine = channelLabels
     ? `CONNECTED CHANNELS — you may ONLY propose actions for these (every action must be auto-publishable): ${channelLabels}. Never propose for any channel not in this list.`
     : `No channels in your area are connected yet, so nothing you propose could be published. Do NOT propose any actions — instead state briefly that the user should connect a channel under "⚙ Channels" to enable this.`;
-  const dupeLine = existing.length ? `\nThese actions already exist — propose NEW, materially different ones, do not repeat them: ${existing.slice(0, 40).join(' | ')}.` : '';
+  const dupeLine = messaging
+    ? `\nMESSAGING ALREADY PUBLISHED/QUEUED on these accounts — do NOT repeat the angle, hook, opening line, structure, or CTA of any of these. Every new action must be MATERIALLY DIFFERENT in BOTH angle and wording, or the account looks like spam:\n${messaging}${usedAngles.length ? `\nAngles already used (pick a DIFFERENT one each time): ${usedAngles.slice(0, 40).join(' · ')}.` : ''}`
+    : '';
   const compLine = /\[competitor\]|Competitive advantage/i.test(findings)
     ? `\nUSE THE COMPETITIVE INTEL ABOVE: attack the gaps competitors are missing, lean into channels/angles they underuse, and differentiate — never just copy them.`
     : '';
@@ -442,12 +465,13 @@ export async function runAgent(args: RunArgs): Promise<RunOutcome> {
     const connected = autoChannels(project.id); // only connected/auto-publishable channels
     const inScope = CHANNELS.filter((c) => cats.includes(c.category) && connected.includes(c.key) && c.key !== 'webhook' && c.key !== 'smtp');
     const labels = inScope.map((c) => `${c.label} (${c.key})`).join(', ');
-    const existing = camp ? listActions(camp.id).filter((a) => inScope.some((c) => c.key === a.channel)).map((a) => a.title) : [];
+    const inScopeActions = camp ? listActions(camp.id).filter((a) => inScope.some((c) => c.key === a.channel)) : [];
+    const { lines: messaging, angles: usedAngles } = messagingDigest(inScopeActions);
     const findings = listFindings(project.id)
       .map((f) => `- [${f.category}] ${f.title}: ${f.summary ?? ''}`).join('\n') || '(see saved findings)';
     prompt = args.resumeSessionId
-      ? `Continue your role from where you left off; propose only for connected channels (${labels || 'none — stop'}), then stop.`
-      : executionPrompt(project, job.kind, budgetLine, labels, findings, existing);
+      ? `Continue your role from where you left off; propose only for connected channels (${labels || 'none — stop'}). Do NOT repeat the angle/hook/opener of anything already posted; every action must be materially different. Then stop.`
+      : executionPrompt(project, job.kind, budgetLine, labels, findings, messaging, usedAngles);
   } else if (job.kind === 'research') {
     mcpTools = RESEARCH_TOOLS;
     prompt = args.resumeSessionId
