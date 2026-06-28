@@ -189,6 +189,7 @@ function init(): DatabaseSync {
   try { db.exec(`ALTER TABLE campaigns ADD COLUMN daily_cap_cents INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
   try { db.exec(`ALTER TABLE campaigns ADD COLUMN auto_posts INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
   try { db.exec(`ALTER TABLE actions ADD COLUMN scheduled_at INTEGER NOT NULL DEFAULT 0`); } catch { /* already present */ }
+  try { db.exec(`ALTER TABLE jobs ADD COLUMN params TEXT`); } catch { /* already present */ }
 
   // Migrate connectors from global (PK key) to per-project (PK project_id,key),
   // assigning existing connections to the most-recently-updated project.
@@ -225,7 +226,7 @@ export type Project = {
 export type Job = {
   id: string; project_id: string; kind: string; title: string; status: string;
   phase: string | null; session_id: string | null; summary: string | null;
-  error: string | null; heartbeat: number | null; created_at: number; updated_at: number;
+  error: string | null; heartbeat: number | null; params: string | null; created_at: number; updated_at: number;
 };
 export type Activity = {
   id: string; job_id: string; project_id: string; kind: string;
@@ -259,12 +260,12 @@ export function updateProject(id: string, patch: Partial<Project>) {
   ).run(next.title, next.phase, next.status, next.summary ?? null, next.updated_at, id);
 }
 
-export function createJob(j: { project_id: string; kind: string; title: string; phase?: string }): Job {
+export function createJob(j: { project_id: string; kind: string; title: string; phase?: string; params?: string }): Job {
   const id = uid('j_'); const t = now();
   db.prepare(
-    `INSERT INTO jobs (id,project_id,kind,title,status,phase,created_at,updated_at)
-     VALUES (?,?,?,?, 'queued', ?, ?,?)`
-  ).run(id, j.project_id, j.kind, j.title, j.phase ?? null, t, t);
+    `INSERT INTO jobs (id,project_id,kind,title,status,phase,params,created_at,updated_at)
+     VALUES (?,?,?,?, 'queued', ?, ?, ?,?)`
+  ).run(id, j.project_id, j.kind, j.title, j.phase ?? null, j.params ?? null, t, t);
   return getJob(id)!;
 }
 
@@ -338,6 +339,11 @@ export const getFinding = (id: string) =>
   db.prepare(`SELECT * FROM findings WHERE id=?`).get(id) as Finding | undefined;
 export const listFindings = (projectId: string) =>
   db.prepare(`SELECT * FROM findings WHERE project_id=? ORDER BY created_at ASC`).all(projectId) as Finding[];
+// Distinct competitor names already analyzed (so a re-run can find NEW ones).
+export const analyzedCompetitors = (projectId: string): string[] => {
+  const rows = db.prepare(`SELECT DISTINCT title FROM findings WHERE project_id=? AND category='competitor'`).all(projectId) as { title: string }[];
+  return rows.map((r) => r.title.trim()).filter(Boolean);
+};
 export const listFiles = (projectId: string) =>
   db.prepare(`SELECT * FROM files WHERE project_id=? ORDER BY created_at ASC`).all(projectId) as FileRow[];
 export const listJobFiles = (jobId: string) =>

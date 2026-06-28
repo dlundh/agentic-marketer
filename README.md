@@ -17,6 +17,9 @@ reload or a full server restart.
 
 - **Three phases, hands-off**: research → go-to-market plan → an execution swarm
   that proposes (or autonomously runs) real marketing actions.
+- **Competitive advantage analysis**: a dedicated agent tears down how the top
+  competitors market (SEO, paid ads, social, positioning) into its own PDF, and
+  feeds the gaps into the marketing. Re-runnable for N more competitors anytime.
 - **Per-project channel connections**: each product you market has its own set of
   connected accounts. Switch between products and posts/ads route to the right
   accounts — connections are never shared across projects.
@@ -56,6 +59,14 @@ Next.js API routes ──► orchestrator ──► Claude Agent SDK (query loop
    customer and the target market, saving findings as it goes and producing a
    *Market & Audience Analysis* PDF. When confident, it calls
    `mark_research_complete`.
+   - **Competitive advantage analysis** — when research completes, a dedicated
+     agent automatically analyzes the top competitors and how each one actually
+     markets (SEO, paid ads, organic social, positioning, pricing, strengths &
+     gaps), then produces a separate *Competitive Advantage Analysis* PDF with a
+     "How We Win" section. Those findings are injected into the execution swarm's
+     prompts so the marketing actively exploits competitors' gaps. You can
+     **re-run it anytime** and choose how many *additional* competitors to
+     analyze — already-covered ones are excluded automatically.
 2. **Marketing phase** — a second agent automatically starts, designing the best
    approach for that customer and producing a *Go-To-Market & Marketing Plan*
    (and a content pack) as PDFs.

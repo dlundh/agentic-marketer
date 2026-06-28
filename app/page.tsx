@@ -119,6 +119,17 @@ export default function Page() {
     loadDetail(currentId);
   };
 
+  const runCompetitors = async (count: number) => {
+    if (!currentId) return;
+    setError(null);
+    const res = await fetch(`/api/projects/${currentId}/competitors`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count }),
+    });
+    const d = await res.json();
+    if (!res.ok) { setError(d.error || 'Could not start competitive analysis.'); return; }
+    loadDetail(currentId);
+  };
+
   const control = async (jobId: string, action: 'pause' | 'resume') => {
     await fetch(`/api/jobs/${jobId}/${action}`, { method: 'POST' });
     if (currentId) loadDetail(currentId);
@@ -235,6 +246,12 @@ export default function Page() {
               {!showJobs && <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· {detail.jobs.length} agent{detail.jobs.length === 1 ? '' : 's'} hidden</span>}
             </h2>
             <DirectionBox directives={detail.directives || []} onAdd={addDirection} />
+            <CompetitivePanel
+              analyzed={detail.findings.filter((f) => f.category === 'competitor').length}
+              files={detail.files.filter((f) => /competitive/i.test(f.name))}
+              live={detail.jobs.some((j) => j.kind === 'competitive' && j.live)}
+              onRun={runCompetitors}
+            />
             {showJobs && (
               <div className="jobs">
                 {detail.jobs.map((j) => (
@@ -312,6 +329,41 @@ export default function Page() {
       {showLaunch && detail && currentId && <LaunchModal projectId={currentId} onClose={() => setShowLaunch(false)} onLaunch={launchCampaign} />}
       {showLists && currentId && <EmailListsModal projectId={currentId} onClose={() => setShowLists(false)} onChanged={() => currentId && loadDetail(currentId)} />}
     </>
+  );
+}
+
+// ------------------------ Competitive advantage -----------------------------
+// Always-available card: shows competitors analyzed so far + the generated PDF,
+// and lets the user run it again for N MORE competitors at any stage.
+function CompetitivePanel({ analyzed, files, live, onRun }: {
+  analyzed: number; files: FileRow[]; live: boolean; onRun: (count: number) => void;
+}) {
+  const [count, setCount] = useState(5);
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="comp-panel">
+      <div className="comp-head">
+        <span className="comp-title">🔍 Competitive advantage</span>
+        <span className="comp-stat">{analyzed} competitor{analyzed === 1 ? '' : 's'} analyzed</span>
+        {live && <span className="auto-working"><span className="spin">⟳</span> analyzing…</span>}
+        <div style={{ flex: 1 }} />
+        {!open && <button className="mini" disabled={live} onClick={() => setOpen(true)}>{analyzed ? 'Analyze more' : 'Analyze competitors'}</button>}
+      </div>
+      {files.length > 0 && (
+        <div className="files-inline" style={{ marginTop: 8 }}>{files.map((f) => <FileRow key={f.id} f={f} />)}</div>
+      )}
+      {open && (
+        <div className="comp-run">
+          <label className="adctl-field"><span>Analyze</span>
+            <input className="mini-input" type="number" min={1} max={25} value={count} onChange={(e) => setCount(Math.max(1, Math.min(25, Number(e.target.value) || 1)))} />
+            <span>{analyzed ? 'more (new) competitors' : 'top competitors'}</span>
+          </label>
+          <button className="mini" disabled={live} onClick={() => { onRun(count); setOpen(false); }}>{live ? 'Running…' : 'Run analysis'}</button>
+          <button className="mini" onClick={() => setOpen(false)}>Cancel</button>
+          {analyzed > 0 && <span className="note" style={{ fontSize: 11 }}>Already-analyzed competitors are excluded automatically.</span>}
+        </div>
+      )}
+    </div>
   );
 }
 

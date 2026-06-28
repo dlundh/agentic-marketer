@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs';
 import {
   DATA_DIR, uid, addActivity, addFinding, addFile, updateJob, updateProject,
   getProject, getJob, touchJob, getCampaignByProject, updateCampaign, createAction,
-  getAction, updateAction, listFindings, directivesText, type Job, type Project, type ActionRow,
+  getAction, updateAction, listFindings, analyzedCompetitors, directivesText, type Job, type Project, type ActionRow,
 } from './db';
 import { emitEvent } from './events';
 import { renderPdf, type PdfSection } from './pdf';
@@ -22,6 +22,7 @@ export function projectDir(projectId: string) {
 export type RunOutcome = {
   researchComplete: boolean;
   marketingComplete: boolean;
+  competitiveComplete?: boolean;
   sessionId?: string;
   finalText?: string;
 };
@@ -115,6 +116,32 @@ function buildTools(job: Job, outcome: RunOutcome) {
     },
   );
 
+  const markCompetitiveComplete = tool(
+    'mark_competitive_complete',
+    'Call this ONCE when you have finished the competitive analysis. Pass the exact list of competitor names/domains you analyzed in THIS run (used so a later re-run finds different competitors), plus how we can win.',
+    {
+      competitors: z.array(z.string()).min(1).describe('Names or domains of the competitors you analyzed in this run'),
+      advantage_summary: z.string().describe('How THIS product can win given how these competitors market (gaps, underused channels, differentiation angles)'),
+    },
+    async (args) => {
+      outcome.competitiveComplete = true;
+      // Persist each competitor as a finding (title = clean name) so the set is
+      // both visible to the user and the exclusion list for a future re-run.
+      const existing = new Set(analyzedCompetitors(projectId).map((s) => s.toLowerCase()));
+      for (const name of args.competitors) {
+        const clean = name.trim();
+        if (clean && !existing.has(clean.toLowerCase())) {
+          addFinding({ project_id: projectId, job_id: job.id, category: 'competitor', title: clean, summary: 'Competitor analyzed (marketing teardown).' });
+          existing.add(clean.toLowerCase());
+        }
+      }
+      addFinding({ project_id: projectId, job_id: job.id, category: 'positioning', title: 'Competitive advantage', summary: args.advantage_summary });
+      log(job, 'status', 'Competitive analysis complete', args.advantage_summary);
+      emitEvent({ type: 'project', projectId });
+      return { content: [{ type: 'text', text: `Recorded ${args.competitors.length} competitor(s) and the advantage summary.` }] };
+    },
+  );
+
   // --- execution-phase tools ---
 
   const checkBudget = tool(
@@ -199,7 +226,7 @@ function buildTools(job: Job, outcome: RunOutcome) {
   return createSdkMcpServer({
     name: 'marketer',
     version: '1.0.0',
-    tools: [saveFinding, createPdf, markResearchComplete, markMarketingComplete, checkBudget, proposeAction, setStrategy],
+    tools: [saveFinding, createPdf, markResearchComplete, markMarketingComplete, markCompetitiveComplete, checkBudget, proposeAction, setStrategy],
   });
 }
 
@@ -207,6 +234,7 @@ const TOOL_PREFIX = 'mcp__marketer__';
 const T = (n: string) => `${TOOL_PREFIX}${n}`;
 const RESEARCH_TOOLS = [T('save_finding'), T('create_pdf_report'), T('mark_research_complete')];
 const MARKETING_TOOLS = [T('save_finding'), T('create_pdf_report'), T('mark_marketing_complete')];
+const COMPETITIVE_TOOLS = [T('save_finding'), T('create_pdf_report'), T('mark_competitive_complete')];
 const EXEC_TOOLS = [T('save_finding'), T('create_pdf_report'), T('check_budget'), T('propose_action'), T('set_strategy')];
 
 // User's steering guidance, injected into every agent prompt so it shapes the
@@ -262,6 +290,38 @@ function marketingPrompt(p: Project, findings: string): string {
   ].filter(Boolean).join('\n');
 }
 
+// Competitive-advantage research. Runs alongside/after the main research and can
+// be re-run later to analyze MORE competitors (excluding ones already done).
+function competitivePrompt(p: Project, count: number, exclude: string[]): string {
+  const excludeLine = exclude.length
+    ? `ALREADY ANALYZED — do NOT re-analyze these; find ${count} DIFFERENT competitors: ${exclude.join(', ')}.`
+    : '';
+  return [
+    `You are an autonomous competitive-intelligence agent for a product-marketing platform.`,
+    directionBlock(p.id),
+    ``,
+    `THE PRODUCT WE ARE MARKETING:`,
+    p.prompt,
+    p.url ? `Primary URL: ${p.url}` : '',
+    p.summary ? `\nWhat we know so far: ${p.summary}` : '',
+    excludeLine ? `\n${excludeLine}` : '',
+    ``,
+    `YOUR JOB (competitive advantage analysis):`,
+    `1. Use WebSearch/WebFetch to identify the ${count} most relevant TOP competitors (direct + notable indirect). ${exclude.length ? 'These must be NEW — different from the already-analyzed list above.' : ''}`,
+    `2. For EACH competitor, investigate HOW they actually market themselves, with evidence:`,
+    `   • SEO: what keywords/topics they rank for, content/blog strategy, site structure, apparent backlink/authority strategy.`,
+    `   • Paid ads: are they running Google Search/Display, Meta, Reddit, or other ads? What angles, offers, and creative themes? (Check ad libraries / SERPs where possible.)`,
+    `   • Organic social & community: which platforms, posting cadence, what content performs, tone.`,
+    `   • Positioning, pricing, and core messaging / value props.`,
+    `   • Apparent strengths and weaknesses / gaps in their marketing.`,
+    `3. Call save_finding (category "competitor") for each competitor with what you learned, and "channel"/"positioning" findings for cross-cutting insights (e.g. an underused channel everyone is ignoring).`,
+    `4. Produce a polished "Competitive Advantage Analysis" PDF using create_pdf_report. Include: an Overview, a per-competitor teardown (SEO / Paid / Social / Positioning / Strengths & Weaknesses), a Comparison table-style section, Market Gaps & Opportunities, and a clear "How We Win" section with concrete, prioritized recommendations for OUR marketing.`,
+    `5. Finish by calling mark_competitive_complete with the exact competitor names you analyzed and a concise advantage summary.`,
+    ``,
+    `Prefer real evidence (their site, ad libraries, SERPs, review sites) over speculation. Be specific and tactical — this directly steers how we market against them.`,
+  ].filter(Boolean).join('\n');
+}
+
 // --- execution swarm -------------------------------------------------------
 
 // Which channel categories each swarm role works across.
@@ -307,7 +367,10 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
     ? `CONNECTED CHANNELS — you may ONLY propose actions for these (every action must be auto-publishable): ${channelLabels}. Never propose for any channel not in this list.`
     : `No channels in your area are connected yet, so nothing you propose could be published. Do NOT propose any actions — instead state briefly that the user should connect a channel under "⚙ Channels" to enable this.`;
   const dupeLine = existing.length ? `\nThese actions already exist — propose NEW, materially different ones, do not repeat them: ${existing.slice(0, 40).join(' | ')}.` : '';
-  const ctx = `${directionBlock(p.id)}\nRESEARCH & PLAN CONTEXT:\n${findings}\n${p.summary ? `\nOverall strategy: ${p.summary}` : ''}\n\n${scopeLine}${dupeLine}\n`;
+  const compLine = /\[competitor\]|Competitive advantage/i.test(findings)
+    ? `\nUSE THE COMPETITIVE INTEL ABOVE: attack the gaps competitors are missing, lean into channels/angles they underuse, and differentiate — never just copy them.`
+    : '';
+  const ctx = `${directionBlock(p.id)}\nRESEARCH & PLAN CONTEXT:\n${findings}\n${p.summary ? `\nOverall strategy: ${p.summary}` : ''}${compLine}\n\n${scopeLine}${dupeLine}\n`;
   const jobByRole: Record<string, string> = {
     strategist: [
       `YOUR ROLE — Growth Strategist:`,
@@ -390,6 +453,14 @@ export async function runAgent(args: RunArgs): Promise<RunOutcome> {
     prompt = args.resumeSessionId
       ? `Continue the research from where you left off. Review what you have already found and finish the remaining steps, then call mark_research_complete.`
       : researchPrompt(project, args.attachments ?? []);
+  } else if (job.kind === 'competitive') {
+    mcpTools = COMPETITIVE_TOOLS;
+    const params = job.params ? JSON.parse(job.params) : {};
+    const count = Math.max(1, Math.min(25, Number(params.count) || 5));
+    const exclude: string[] = Array.isArray(params.exclude) ? params.exclude : [];
+    prompt = args.resumeSessionId
+      ? `Continue the competitive analysis from where you left off; finish analyzing the remaining competitors, produce the "Competitive Advantage Analysis" PDF, then call mark_competitive_complete.`
+      : competitivePrompt(project, count, exclude);
   } else {
     mcpTools = MARKETING_TOOLS;
     prompt = args.resumeSessionId
@@ -412,6 +483,7 @@ export async function runAgent(args: RunArgs): Promise<RunOutcome> {
 
   const startNote = isExec ? (ROLE_LABELS[job.kind] || 'Executing marketing actions')
     : job.kind === 'research' ? 'Scouring the web to understand the product and market'
+    : job.kind === 'competitive' ? 'Analyzing competitors’ SEO, paid ads & marketing'
     : 'Building the marketing strategy';
   log(job, 'status', args.resumeSessionId ? 'Resumed' : 'Started', startNote);
   touchJob(job.id);

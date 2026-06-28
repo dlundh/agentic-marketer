@@ -3,7 +3,7 @@ import {
   listFindings, listAllActiveJobs, createCampaign, getCampaign, getCampaignByProject,
   updateCampaign, getAction, updateAction, reserveSpend, refundSpend, resetStaleRevisions,
   addFunds, removeFunds, setSpend, listActions, getConnector, listActiveCampaigns,
-  scheduleAction, dueScheduledActions,
+  scheduleAction, dueScheduledActions, analyzedCompetitors,
   type Job, type ActionRow, type Campaign,
 } from './db';
 import { emitEvent } from './events';
@@ -81,13 +81,16 @@ async function drive(job: Job, opts: { resume?: boolean; attachments?: string[] 
     updateJob(job.id, { status: 'done', summary: outcome.finalText?.slice(0, 2000) ?? null });
     emitEvent({ type: 'job', projectId: job.project_id, jobId: job.id });
 
-    // Research -> Marketing transition.
+    // Research -> Marketing transition (+ kick off competitive analysis in parallel).
     if (job.kind === 'research' && getProject(job.project_id)?.phase === 'marketing') {
-      const existing = listJobs(job.project_id).find((j) => j.kind === 'marketing');
-      if (!existing) {
+      const jobs = listJobs(job.project_id);
+      if (!jobs.some((j) => j.kind === 'marketing')) {
         const mkt = createJob({ project_id: job.project_id, kind: 'marketing', title: 'Active marketing — strategy & content', phase: 'marketing' });
         emitEvent({ type: 'job', projectId: job.project_id, jobId: mkt.id });
         drive(mkt); // fire and forget
+      }
+      if (!jobs.some((j) => j.kind === 'competitive')) {
+        analyzeCompetitors(job.project_id, 5); // first competitive pass: top 5
       }
     }
 
@@ -210,6 +213,22 @@ function spawnRoles(projectId: string, roles: string[], skipIfExisting: boolean)
 // Initial fan-out after the strategist — scoped to currently-connected channels.
 function spawnSpecialists(projectId: string) {
   spawnRoles(projectId, rolesForChannels(autoChannels(projectId)), true);
+}
+
+// Competitive-advantage analysis. Analyzes `count` competitors and produces a
+// "Competitive Advantage Analysis" PDF. Re-runnable: each pass excludes the
+// competitors already analyzed and finds `count` NEW ones. Returns the job, or
+// null if one is already running.
+export function analyzeCompetitors(projectId: string, count: number): Job | null {
+  if (!getProject(projectId)) return null;
+  if (listJobs(projectId).some((j) => j.kind === 'competitive' && (j.status === 'running' || j.status === 'queued'))) return null;
+  const n = Math.max(1, Math.min(25, Math.round(count) || 5));
+  const exclude = analyzedCompetitors(projectId);
+  const title = exclude.length ? `Competitive analysis — ${n} more competitor${n === 1 ? '' : 's'}` : `Competitive advantage — top ${n} competitors`;
+  const job = createJob({ project_id: projectId, kind: 'competitive', title, phase: 'research', params: JSON.stringify({ count: n, exclude }) });
+  emitEvent({ type: 'job', projectId, jobId: job.id });
+  drive(job); // fire and forget
+  return job;
 }
 
 // On-demand: generate a fresh batch of actions for the currently-connected
