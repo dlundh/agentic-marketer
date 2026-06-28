@@ -709,8 +709,10 @@ function adSpendBlock(c: Campaign | undefined, dailyCents: number): string {
 export function reviseAction(actionId: string, feedback: string): boolean {
   const a = getAction(actionId);
   if (!a || !feedback.trim()) return false;
-  if (!['proposed', 'ready', 'failed'].includes(a.status)) return false;
+  if (!['proposed', 'scheduled', 'ready', 'failed'].includes(a.status)) return false;
   if (a.cost_cents > 0 && a.status === 'approved') return false; // don't touch reserved/executing
+  // A scheduled post keeps its slot through the revision (re-publishing as 'scheduled').
+  const revertStatus = a.status === 'scheduled' ? 'scheduled' : 'proposed';
   const meta = a.meta ? JSON.parse(a.meta) : {};
   meta.revisions = [...(meta.revisions || []), { feedback: feedback.trim(), ts: Date.now() }];
   updateAction(actionId, { meta: JSON.stringify(meta), status: 'revising', result: null });
@@ -719,9 +721,9 @@ export function reviseAction(actionId: string, feedback: string): boolean {
   (async () => {
     try {
       const ok = await runRevision({ action: getAction(actionId)!, feedback: feedback.trim(), abort });
-      if (!ok) updateAction(actionId, { status: 'proposed', result: 'Revision did not produce changes — please try rephrasing.' });
+      if (!ok) updateAction(actionId, { status: revertStatus, result: 'Revision did not produce changes — please try rephrasing.' });
     } catch (err: any) {
-      updateAction(actionId, { status: 'proposed', result: 'Revision error: ' + String(err?.message || err) });
+      updateAction(actionId, { status: revertStatus, result: 'Revision error: ' + String(err?.message || err) });
     }
     emitEvent({ type: 'finding', projectId: a.project_id });
   })();

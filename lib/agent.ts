@@ -589,13 +589,15 @@ export async function runRevision(opts: { action: ActionRow; feedback: string; a
         if ((a as any)[k] !== undefined) meta[k] = (a as any)[k];
       }
       const cost = a.cost_usd !== undefined ? Math.max(0, Math.round(a.cost_usd * 100)) : cur.cost_cents;
+      // A scheduled post keeps its slot (stays 'scheduled'); others return to the queue.
+      const restoreScheduled = cur.scheduled_at > 0;
       updateAction(action.id, {
         title: a.title, summary: a.summary, content: a.content, cost_cents: cost,
-        meta: JSON.stringify(meta), status: 'proposed', result: null,
+        meta: JSON.stringify(meta), status: restoreScheduled ? 'scheduled' : 'proposed', result: null,
       });
       updated = true;
       emitEvent({ type: 'finding', projectId: action.project_id });
-      return { content: [{ type: 'text', text: 'Revision saved; the action is back in the approval queue.' }] };
+      return { content: [{ type: 'text', text: restoreScheduled ? 'Revision saved; the post keeps its scheduled slot.' : 'Revision saved; the action is back in the approval queue.' }] };
     },
   );
 

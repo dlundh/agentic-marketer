@@ -859,11 +859,22 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenL
       {a.summary && <div className="action-sum">{a.summary}</div>}
 
       {a.status === 'scheduled' && a.scheduled_at ? (
-        <div className="signup-row">
-          <span className="auto-pill on">⏱ auto-publishes {fmtWhen(a.scheduled_at)}</span>
-          <button className="mini" disabled={acting} onClick={async () => { setActing(true); await onDecide(a.id, 'approve', isEmail ? listId : undefined); setActing(false); }}>Publish now</button>
-          <button className="mini" disabled={acting} title="Cancel the schedule and discard" onClick={() => onDecide(a.id, 'reject')}>Cancel</button>
-        </div>
+        <>
+          <div className="signup-row">
+            <span className="auto-pill on">⏱ auto-publishes {fmtWhen(a.scheduled_at)}</span>
+            <button className="mini" disabled={acting} onClick={async () => { setActing(true); await onDecide(a.id, 'approve', isEmail ? listId : undefined); setActing(false); }}>Publish now</button>
+            <button className="mini" disabled={acting} title="Cancel the schedule and discard" onClick={() => onDecide(a.id, 'reject')}>Cancel</button>
+          </div>
+          <div className="feedback">
+            <textarea
+              placeholder="Adjust this scheduled post before it goes out — e.g. “punchier hook, mention the free tier, drop the emoji”…"
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); }}
+            />
+            <button className="revise-btn" onClick={send} disabled={!feedback.trim()}>↻ Revise</button>
+          </div>
+        </>
       ) : null}
 
       {meta.paused_reason && (
