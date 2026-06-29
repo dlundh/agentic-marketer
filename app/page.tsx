@@ -1326,7 +1326,8 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
   const [cid, setCid] = useState('');
   const [csec, setCsec] = useState('');
   const [gDevToken, setGDevToken] = useState('');   // Google Ads developer token
-  const [gCustomer, setGCustomer] = useState('');   // Google Ads customer id
+  const [gCustomer, setGCustomer] = useState('');   // Google Ads customer id (the account that runs the ads)
+  const [gManager, setGManager] = useState('');     // Google Ads manager (MCC) id, optional → login-customer-id
   const [webhookMode, setWebhookMode] = useState(false);
   const isOAuth = ['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads', 'google_ads', 'reddit_ads'].includes(c.key);
   const isGoogleAds = c.key === 'google_ads';
@@ -1422,11 +1423,13 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
               {isGoogleAds && (
                 <>
                   <input className="field" type="password" placeholder="Developer token" value={gDevToken} onChange={(e) => setGDevToken(e.target.value)} />
-                  <input className="field" placeholder="Customer ID (e.g. 123-456-7890)" value={gCustomer} onChange={(e) => setGCustomer(e.target.value)} />
+                  <input className="field" placeholder="Customer ID — the ad account that runs ads (e.g. 123-456-7890)" value={gCustomer} onChange={(e) => setGCustomer(e.target.value)} />
+                  <input className="field" placeholder="Manager (MCC) ID — optional, if the account is under a manager" value={gManager} onChange={(e) => setGManager(e.target.value)} />
+                  <div className="note" style={{ fontSize: 11 }}>Using a manager account? Put the client ad account in <b>Customer ID</b> and the manager (MCC) ID in <b>Manager ID</b>. The Google account you sign in with must have access to that manager.</div>
                 </>
               )}
               <button className="approve" onClick={() => startOAuth(isGoogleAds
-                ? { client_id: cid.trim(), client_secret: csec.trim(), developer_token: gDevToken.trim(), customer_id: gCustomer.trim() }
+                ? { client_id: cid.trim(), client_secret: csec.trim(), developer_token: gDevToken.trim(), customer_id: gCustomer.trim(), login_customer_id: gManager.trim() }
                 : { client_id: cid.trim(), client_secret: csec.trim() })} disabled={busy || !cid.trim() || !csec.trim() || (isGoogleAds && (!gDevToken.trim() || !gCustomer.trim()))}>
                 {busy ? <span className="spin">⟳</span> : `Connect with ${c.label} ↗`}
               </button>
