@@ -256,6 +256,8 @@ a { color: var(--accent); }
 .comp-stat { font-size: 12px; color: var(--muted); }
 .comp-run { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .angle-pill { font-size: 10.5px; color: var(--accent); background: rgba(124,124,240,.12); border: 1px solid rgba(124,124,240,.25); padding: 2px 7px; border-radius: 6px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.reply-ctx { margin: 6px 14px 0; padding: 8px 10px; border-left: 2px solid var(--accent); background: var(--bg-soft); border-radius: 0 8px 8px 0; display: flex; flex-direction: column; gap: 5px; }
+.reply-quote { font-size: 12px; color: var(--muted); font-style: italic; line-height: 1.5; }
 .fa-off { color: var(--muted); font-size: 11px; letter-spacing: .5px; }
 .adctl-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .adctl-stat { display: flex; flex-direction: column; gap: 1px; }

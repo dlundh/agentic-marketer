@@ -168,6 +168,29 @@ CSV, maintain a per-project suppression set, and handle unsubscribes automatical
 (every send carries an opt-out link/footer). Outreach copy uses `{{first_name}}`,
 `{{name}}`, `{{company}}`, and `{{email}}` merge tokens, personalized per recipient.
 
+### Community listening & conversation
+
+A **listening agent** runs for each connected organic/community channel (X,
+Reddit, Mastodon). It finds where your target audience is *already* talking —
+about the problem you solve, alternatives, or relevant questions — and proposes
+**value-first replies** that earn goodwill and subtly surface the product.
+
+Hard guardrails (this is the easiest feature to turn into spam, so it's the most
+constrained):
+- **Helpful first** — the reply must add real value even if they never click; if
+  there's nothing useful to say, it proposes nothing.
+- **Honest + disclosed** — it only mentions the product where it genuinely fits,
+  and discloses the affiliation plainly. It never poses as an unaffiliated happy
+  user (astroturfing is forbidden — it violates platform/FTC rules and hurts the
+  brand).
+- **Always human-approved** — reply actions show the source post (with a link and
+  a quote of the original) and are **never auto-posted**, even in full-auto mode.
+  You approve each one, and it posts as a real reply via the channel API.
+- Respects venue rules; small, high-quality batches; never repeat-replies a user.
+
+(LinkedIn has no API for replying to arbitrary posts, so it's surfaced as a
+manual copy/paste instead.)
+
 ### Steering & revising
 
 - **Direction & ideas** (project level): a chat box where you add goals, angles,

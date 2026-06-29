@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import { getConnector, upsertConnector, activeRecipients, getProject, type ActionRow, type Connector, type Recipient } from './db';
-import { postMastodon, postX, refreshX, postReddit, refreshReddit, postLinkedin } from './oauth';
+import { postMastodon, postX, refreshX, postReddit, refreshReddit, postLinkedin, postRedditComment, tweetIdFromUrl, mastodonIdFromUrl, redditParentFromUrl } from './oauth';
 import type { AdSpec } from './meta';
 import { isAdChannel, adProvider } from './adproviders';
 
@@ -246,6 +246,35 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
   try {
     // Native API adapters: post directly via the platform (no webhook needed).
     const text = (action.content || action.summary || action.title || '').trim();
+
+    // Community-listening reply: post `content` as a reply/comment on a specific
+    // existing post (found by the engagement agent), via the channel's API.
+    if (action.kind === 'reply') {
+      const m = safeJSON(action.meta) || {};
+      const url = String(m.reply_to_url || '').trim();
+      if (!url) return { status: 'ready', detail: 'This reply has no target post URL — add the post to reply to, then approve.' };
+      if (!ownSecrets?.access_token) return { status: 'ready', detail: `Connect ${def.label} under ⚙ Channels to post this reply.` };
+      if (action.channel === 'x') {
+        const id = tweetIdFromUrl(url);
+        if (!id) return { status: 'failed', detail: `Couldn't read the tweet id from ${url}.` };
+        const r = await withRefresh(action.project_id, 'x', ownSecrets, def.label, (tok) => postX(tok, text, id));
+        return { status: 'done', detail: `Replied on X${r.url ? `: ${r.url}` : ''}` };
+      }
+      if (action.channel === 'mastodon' && ownSecrets.instance) {
+        const id = mastodonIdFromUrl(url);
+        if (!id) return { status: 'failed', detail: `Couldn't read the status id from ${url}.` };
+        const r = await postMastodon(ownSecrets.instance, ownSecrets.access_token, text, id);
+        return { status: 'done', detail: `Replied on Mastodon: ${r.url}` };
+      }
+      if (action.channel === 'reddit') {
+        const parent = redditParentFromUrl(url);
+        if (!parent) return { status: 'failed', detail: `Couldn't read the Reddit post/comment id from ${url}.` };
+        const r = await withRefresh(action.project_id, 'reddit', ownSecrets, def.label, (tok) => postRedditComment(tok, parent, text));
+        return { status: 'done', detail: `Commented on Reddit${r.url ? `: ${r.url}` : ''}` };
+      }
+      return { status: 'ready', detail: `Auto-replies aren't supported on ${def.label} yet — open ${url} and reply manually.` };
+    }
+
     if (action.channel === 'mastodon' && ownSecrets?.access_token && ownSecrets?.instance) {
       const r = await postMastodon(ownSecrets.instance, ownSecrets.access_token, text);
       return { status: 'done', detail: `Posted to Mastodon${ownSecrets.handle ? ` as @${ownSecrets.handle}` : ''}${r.count > 1 ? ` (${r.count}-post thread)` : ''}: ${r.url}` };

@@ -65,9 +65,9 @@ export async function verifyXAccount(token: string): Promise<{ handle: string; u
   const j: any = await res.json();
   return { handle: j.data?.username, url: j.data?.username ? `https://x.com/${j.data.username}` : '' };
 }
-export async function postX(token: string, text: string): Promise<{ url: string; count: number }> {
+export async function postX(token: string, text: string, inReplyTo?: string): Promise<{ url: string; count: number }> {
   const chunks = chunkText(text, 270);
-  let replyTo: string | undefined; let firstId = '';
+  let replyTo: string | undefined = inReplyTo; let firstId = '';
   for (let i = 0; i < chunks.length; i++) {
     const payload: any = { text: chunks.length > 1 ? `${chunks[i]} (${i + 1}/${chunks.length})` : chunks[i] };
     if (replyTo) payload.reply = { in_reply_to_tweet_id: replyTo };
@@ -132,6 +132,31 @@ export async function postReddit(token: string, subreddit: string, title: string
   const errs = j?.json?.errors;
   if (errs && errs.length) throw new Error(`Reddit: ${JSON.stringify(errs[0])}`);
   return { url: j?.json?.data?.url || '' };
+}
+// Comment on an existing post/comment. parentFullname is t3_<postid> or t1_<commentid>.
+export async function postRedditComment(token: string, parentFullname: string, text: string): Promise<{ url: string }> {
+  const res = await fetch('https://oauth.reddit.com/api/comment', {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': REDDIT_UA },
+    body: new URLSearchParams({ thing_id: parentFullname, text, api_type: 'json' }), signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error(`Reddit comment failed (HTTP ${res.status}): ${(await res.text()).slice(0, 140)}`);
+  const j: any = await res.json();
+  const errs = j?.json?.errors;
+  if (errs && errs.length) throw new Error(`Reddit: ${JSON.stringify(errs[0])}`);
+  const thing = j?.json?.data?.things?.[0]?.data;
+  return { url: thing?.permalink ? `https://reddit.com${thing.permalink}` : '' };
+}
+
+// ---- Parse a post URL into the id needed to reply to it --------------------
+// X/Twitter status: …/status/<id>
+export const tweetIdFromUrl = (url: string): string | null => url.match(/status\/(\d+)/)?.[1] || null;
+// Mastodon status: …/@user/<id> or …/statuses/<id> (trailing numeric id)
+export const mastodonIdFromUrl = (url: string): string | null => url.match(/\/(?:statuses\/)?(\d{5,})\/?(?:[?#].*)?$/)?.[1] || null;
+// Reddit: prefer the deepest comment (t1_), else the post (t3_).
+export function redditParentFromUrl(url: string): string | null {
+  const m = url.match(/\/comments\/([a-z0-9]+)(?:\/[^/]*\/([a-z0-9]+))?/i);
+  if (!m) return null;
+  return m[2] ? `t1_${m[2]}` : `t3_${m[1]}`;
 }
 
 // ---- LinkedIn (OAuth2, posts via UGC API) ---------------------------------
@@ -230,7 +255,7 @@ async function postStatus(instance: string, token: string, status: string, inRep
 }
 
 // Post text, splitting into a reply-chain thread if it exceeds the per-post limit.
-export async function postMastodon(instance: string, token: string, text: string): Promise<{ url: string; count: number }> {
+export async function postMastodon(instance: string, token: string, text: string, inReplyTo?: string): Promise<{ url: string; count: number }> {
   const LIMIT = 480;
   const clean = text.trim();
   let chunks: string[] = [];
@@ -244,7 +269,7 @@ export async function postMastodon(instance: string, token: string, text: string
     }
     if (cur) chunks.push(cur.trim());
   }
-  let replyTo: string | undefined;
+  let replyTo: string | undefined = inReplyTo;
   let firstUrl = '';
   for (let i = 0; i < chunks.length; i++) {
     const status = chunks.length > 1 ? `${chunks[i]} (${i + 1}/${chunks.length})` : chunks[i];

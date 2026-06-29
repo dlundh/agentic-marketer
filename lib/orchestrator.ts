@@ -206,6 +206,9 @@ function rolesForChannels(channelKeys: string[]): string[] {
     const cat = channelDef(key).category;
     const role = CATEGORY_ROLE[cat];
     if (role) roles.add(role);
+    // Organic/community channels also get a listening agent that joins relevant
+    // existing conversations (proposes value-first replies for approval).
+    if (cat === 'organic' || cat === 'community') roles.add('engagement');
   }
   return [...roles];
 }
@@ -386,6 +389,7 @@ const postWindow = (channel: string) => POST_WINDOWS[channel] || DEFAULT_WINDOW;
 // email — those are handled elsewhere and need explicit targeting/lists).
 function isAutoPostable(a: ActionRow): boolean {
   if (a.kind === 'ad') return false;
+  if (a.kind === 'reply') return false; // replies are time-sensitive + sensitive — stay human-approved, never bulk-scheduled
   const cat = channelDef(a.channel).category;
   if (cat !== 'organic' && cat !== 'community' && cat !== 'content') return false;
   return isAutoExecutable(a); // only schedule what we can actually publish (channel connected)

@@ -164,7 +164,7 @@ function buildTools(job: Job, outcome: RunOutcome) {
     'Propose ONE concrete marketing action for human approval (nothing is published or spent until the user approves). Write real, ready-to-publish copy in `content`.',
     {
       channel: z.string().describe('Channel key, e.g. x, linkedin, reddit, producthunt, hackernews, email, influencer, meta_ads, google_ads, blog'),
-      kind: z.enum(['post', 'thread', 'ad', 'email', 'outreach', 'experiment', 'asset', 'seo', 'video']).describe('Type of action'),
+      kind: z.enum(['post', 'thread', 'ad', 'email', 'outreach', 'experiment', 'asset', 'seo', 'video', 'reply']).describe('Type of action ("reply" = a comment/reply on a specific existing post found via listening)'),
       title: z.string().describe('Short label for the queue'),
       summary: z.string().describe('One line: what this does and why'),
       content: z.string().describe('The actual ready-to-publish copy / script / ad text'),
@@ -180,6 +180,8 @@ function buildTools(job: Job, outcome: RunOutcome) {
       headlines: z.array(z.string()).optional().describe('REQUIRED for google_ads: 3–15 distinct short headlines, each ≤30 chars (responsive search ad).'),
       descriptions: z.array(z.string()).optional().describe('REQUIRED for google_ads: 2–4 distinct descriptions, each ≤90 chars (responsive search ad).'),
       link: z.string().optional().describe('Destination URL for ads (defaults to the product URL)'),
+      reply_to_url: z.string().optional().describe('REQUIRED for kind "reply": the exact URL of the existing post/comment to reply to (must be on the same connected channel).'),
+      reply_to_context: z.string().optional().describe('For kind "reply": a short quote/summary of the original post so the human can judge relevance before approving.'),
     },
     async (args) => {
       const c = getCampaignByProject(projectId);
@@ -194,7 +196,8 @@ function buildTools(job: Job, outcome: RunOutcome) {
         meta: { recipients: args.recipients, subject: args.subject, targeting: args.targeting,
                 schedule: args.schedule, rationale: args.rationale, overBudget, angle: args.angle,
                 image_url: args.image_url, headline: args.headline, headlines: args.headlines,
-                descriptions: args.descriptions, link: args.link },
+                descriptions: args.descriptions, link: args.link,
+                reply_to_url: args.reply_to_url, reply_to_context: args.reply_to_context },
       });
       log(job, 'action', `${channelDef(args.channel).label} · ${args.kind}${cost ? ` · $${(cost / 100).toFixed(2)}` : ''}`, args.title);
       emitEvent({ type: 'finding', projectId, jobId: job.id });
@@ -332,6 +335,7 @@ function competitivePrompt(p: Project, count: number, exclude: string[]): string
 export const ROLE_CATEGORIES: Record<string, string[]> = {
   strategist: ['organic', 'community', 'content', 'email', 'paid', 'influencer', 'automation'],
   organic: ['organic', 'community', 'content'],
+  engagement: ['organic', 'community'],
   email: ['email'],
   ads: ['paid'],
   influencer: ['influencer'],
@@ -340,6 +344,7 @@ export const ROLE_CATEGORIES: Record<string, string[]> = {
 export const ROLE_LABELS: Record<string, string> = {
   strategist: 'Growth strategist — budget allocation & plan',
   organic: 'Organic & community growth',
+  engagement: 'Community listening — join relevant conversations',
   email: 'Email & direct outreach',
   ads: 'Paid advertising',
   influencer: 'Influencer & creator outreach',
@@ -430,6 +435,19 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
       `YOUR ROLE — Influencer & Creator Outreach:`,
       `Use web search to identify 5–10 relevant micro/nano-creator archetypes and example creators/communities for this product. For each, propose_action with kind "outreach", channel "influencer", a pitch in \`content\`, and a fair UGC/affiliate offer that fits the budget. No payment promises beyond budget.`,
       `These send through the email pipeline to a recipient list, so TEMPLATE the pitch with merge tokens (filled per recipient): open with "Hi {{first_name}}," and use {{company}} where natural. Do NOT hardcode a specific creator's name. Leave recipients empty — the user picks a list at approval.`,
+    ].join('\n'),
+    engagement: [
+      `YOUR ROLE — Community Listening & Conversation (organic, cost $0):`,
+      `Find places where THIS product's target audience is ALREADY talking — about the problem we solve, alternatives, or relevant questions — on your connected channels ONLY (${channelLabels || 'none'}), and propose genuinely helpful replies that earn goodwill and subtly surface the product.`,
+      `HOW TO FIND THEM: use WebSearch (e.g. site:reddit.com + the pain points/keywords from the research; recent questions; "alternatives to <competitor>"). For each promising thread, WebFetch it to read the real, current discussion. Only consider posts on a channel we're connected to.`,
+      `For each genuinely relevant conversation, call propose_action with kind "reply", the channel, \`reply_to_url\` = the EXACT post/comment URL, \`reply_to_context\` = a short quote of what they said, and \`content\` = the reply to post.`,
+      `THE REPLY MUST BE (non-negotiable — anything less is spam and will get the account banned and hurt the brand):`,
+      `  • Genuinely helpful and on-topic FIRST — answer their question / add real insight even if they never click. If you have nothing useful to add, DO NOT propose a reply.`,
+      `  • Natural, warm, human, and encouraging — like a knowledgeable peer, not an ad. Match the thread's tone. No marketing-speak, no hype, no emoji spam.`,
+      `  • HONEST + DISCLOSED: only mention the product where it truly fits, and when you do, disclose the affiliation plainly (e.g. "full disclosure, I work on <product>"). NEVER pose as an unaffiliated happy user — that is astroturfing and is forbidden.`,
+      `  • Subtle: at most ONE soft mention/link, and only if it actually helps them. Often the best reply mentions us not at all — that still builds brand goodwill.`,
+      `  • Respect the venue: follow subreddit/community rules; skip threads where self-promotion is unwelcome or off-topic; never reply to the same author repeatedly.`,
+      `Propose a SMALL, high-quality batch (≈3–6), each a different thread/angle. Quality and authenticity over volume. These post as real replies once approved.`,
     ].join('\n'),
     optimizer: [
       `YOUR ROLE — Optimizer:`,

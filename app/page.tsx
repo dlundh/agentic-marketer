@@ -889,6 +889,14 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenL
       </div>
       {a.summary && <div className="action-sum">{a.summary}</div>}
 
+      {a.kind === 'reply' && meta.reply_to_url && (
+        <div className="reply-ctx">
+          <a className="signup-link" href={meta.reply_to_url} target="_blank" rel="noreferrer">↩ Replying to this {chLabel(a.channel)} post ↗</a>
+          {meta.reply_to_context && <div className="reply-quote">“{meta.reply_to_context}”</div>}
+          <div className="note" style={{ fontSize: 11 }}>Review the thread before approving — it posts as a public reply from your account.</div>
+        </div>
+      )}
+
       {a.status === 'scheduled' && a.scheduled_at ? (
         <>
           <div className="signup-row">
