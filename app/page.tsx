@@ -932,6 +932,16 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenL
           <button className="mini" onClick={() => onAdControl(a.id, 'pause_ad')}>Pause</button>
         </div>
       )}
+      {/* Traffic is flowing but 0 conversions reported → conversion tracking likely isn't set up. */}
+      {a.kind === 'ad' && a.status === 'done' && !meta.ad_paused && meta.perf && !meta.perf.conversions && ((meta.perf.clicks || 0) >= 5 || (meta.perf.spend_cents || 0) >= 200) && (
+        <div className="note" style={{ fontSize: 11, color: 'var(--muted)' }}>
+          ⚠ Getting clicks but <b>0 conversions tracked</b>. {
+            a.channel === 'google_ads' ? 'For an App campaign, set up Google Ads conversion tracking (Firebase SDK or a linked Google Play account) so installs report back here — the optimizer can’t see installs without it.'
+            : a.channel === 'meta_ads' ? 'Check your Meta pixel / app events are configured, or installs/conversions won’t report here.'
+            : 'Check conversion tracking is configured on the platform, or conversions won’t report here.'
+          } Until then, optimization falls back to CTR/CPC.
+        </div>
+      )}
 
       {meta.signup_url && (
         <div className="signup-row">
