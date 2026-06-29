@@ -16,11 +16,31 @@
 import type { AdProvider, AdIds, AdMetrics } from './adproviders';
 import type { AdSpec } from './meta';
 
-const API = 'https://googleads.googleapis.com/v18';
+// API version is overridable — Google sunsets versions ~yearly, and a sunset
+// version returns a 404 HTML page (not JSON). Bump via GOOGLE_ADS_API_VERSION.
+const V = process.env.GOOGLE_ADS_API_VERSION || 'v18';
+const API = `https://googleads.googleapis.com/${V}`;
 const OAUTH = 'https://oauth2.googleapis.com';
 export const GOOGLE_ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
 
 const digits = (s: string) => String(s || '').replace(/\D/g, '');
+
+// Read a response as JSON, but if Google returned HTML/non-JSON (sunset API
+// version, API not enabled, an auth/redirect page…), surface a clear, actionable
+// error instead of a cryptic "Unexpected token '<'" parse failure.
+async function readJson(res: Response, where: string): Promise<any> {
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch {
+    const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 160);
+    const hint = res.status === 404
+      ? `the Google Ads API version (${V}) may be sunset — set GOOGLE_ADS_API_VERSION to a current one`
+      : res.status === 403
+      ? 'the Google Ads API may not be enabled for this Cloud project, or the developer token lacks access'
+      : 'check the Google Ads API is enabled and the developer token is approved';
+    throw new Error(`Google Ads ${where}: HTTP ${res.status} returned a non-JSON page — ${hint}. (${snippet})`);
+  }
+}
 
 function gerr(path: string, j: any, status: number): Error {
   // Google Ads surfaces the real reason under error.details[].errors[].message.
@@ -41,7 +61,7 @@ export function googleAuthorizeUrl(clientId: string, redirectUri: string, state:
 export async function exchangeGoogleCode(clientId: string, clientSecret: string, code: string, redirectUri: string): Promise<{ access_token: string; refresh_token: string }> {
   const body = new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: redirectUri, grant_type: 'authorization_code' });
   const res = await fetch(`${OAUTH}/token`, { method: 'POST', body, signal: AbortSignal.timeout(15000) });
-  const j: any = await res.json();
+  const j: any = await readJson(res, 'token exchange');
   if (!res.ok) throw new Error(`Google token exchange: ${j.error_description || j.error || res.status}`);
   return { access_token: j.access_token, refresh_token: j.refresh_token };
 }
@@ -49,7 +69,7 @@ async function accessToken(s: any): Promise<string> {
   if (!s?.refresh_token) throw new Error('Google Ads isn’t fully connected (missing refresh token) — reconnect.');
   const body = new URLSearchParams({ client_id: s.client_id, client_secret: s.client_secret, refresh_token: s.refresh_token, grant_type: 'refresh_token' });
   const res = await fetch(`${OAUTH}/token`, { method: 'POST', body, signal: AbortSignal.timeout(15000) });
-  const j: any = await res.json();
+  const j: any = await readJson(res, 'token refresh');
   if (!res.ok) throw new Error(`Google token refresh: ${j.error_description || j.error || res.status}`);
   return j.access_token;
 }
@@ -68,7 +88,7 @@ async function mutate(s: any, token: string, resource: string, operations: any[]
   const res = await fetch(`${API}/customers/${cid}/${resource}:mutate`, {
     method: 'POST', headers: headers(token, s), body: JSON.stringify({ operations }), signal: AbortSignal.timeout(20000),
   });
-  const j: any = await res.json();
+  const j: any = await readJson(res, `${resource}:mutate`);
   if (!res.ok || j.error) throw gerr(resource, j, res.status);
   return j.results?.[0]?.resourceName || '';
 }
@@ -77,7 +97,7 @@ async function mutate(s: any, token: string, resource: string, operations: any[]
 export async function listGoogleCustomers(s: any): Promise<string[]> {
   const token = await accessToken(s);
   const res = await fetch(`${API}/customers:listAccessibleCustomers`, { headers: headers(token, s), signal: AbortSignal.timeout(15000) });
-  const j: any = await res.json();
+  const j: any = await readJson(res, 'listAccessibleCustomers');
   if (!res.ok || j.error) throw gerr('listAccessibleCustomers', j, res.status);
   return (j.resourceNames || []).map((r: string) => r.split('/')[1]);
 }
@@ -182,7 +202,7 @@ export async function googleInsights(s: any, ids: AdIds): Promise<AdMetrics> {
   const res = await fetch(`${API}/customers/${cid}/googleAds:search`, {
     method: 'POST', headers: headers(token, s), body: JSON.stringify({ query }), signal: AbortSignal.timeout(20000),
   });
-  const j: any = await res.json();
+  const j: any = await readJson(res, 'googleAds:search');
   if (!res.ok || j.error) throw gerr('googleAds:search', j, res.status);
   const m = j.results?.[0]?.metrics || {};
   return { spendCents: Math.round(Number(m.costMicros || 0) / 10_000), impressions: +(m.impressions || 0), clicks: +(m.clicks || 0) };
