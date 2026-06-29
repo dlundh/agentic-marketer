@@ -10,7 +10,8 @@ import {
 import { emitEvent } from './events';
 import { renderPdf, type PdfSection } from './pdf';
 import { channelDef, CHANNELS, autoChannels } from './connectors';
-import { listActions } from './db';
+import { listActions, getConnector } from './db';
+import { parseAppStoreUrl } from './google';
 
 export function projectDir(projectId: string) {
   const dir = path.join(DATA_DIR, 'projects', projectId);
@@ -390,7 +391,7 @@ function messagingDigest(actions: ActionRow[]): { lines: string; angles: string[
   return { lines, angles: [...angles] };
 }
 
-function executionPrompt(p: Project, role: string, budgetLine: string, channelLabels: string, findings: string, messaging = '', usedAngles: string[] = []): string {
+function executionPrompt(p: Project, role: string, budgetLine: string, channelLabels: string, findings: string, messaging = '', usedAngles: string[] = [], googleObjective: string | null = null): string {
   const head = tacticsPolicy(p, budgetLine);
   const scopeLine = channelLabels
     ? `CONNECTED CHANNELS — you may ONLY propose actions for these (every action must be auto-publishable): ${channelLabels}. Never propose for any channel not in this list.`
@@ -426,9 +427,11 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
     ads: [
       `YOUR ROLE — Paid Advertising (strictly budget-bound):`,
       `Call check_budget first. Design paid experiments for your in-scope channels that fit the remaining budget. If budget is low/zero, first search the web for current free ad credits/coupons (Google Ads, Microsoft Advertising, Meta, etc.) and propose $0 or minimal-cost tests. For each experiment use propose_action kind "ad" with the hook + primary text in \`content\`, audience in \`targeting\`, and a realistic cost_usd (this is the DAILY budget for the ad).`,
-      `EVERY ad needs a destination \`link\` — a WEBSITE landing page, NOT an App Store / Google Play URL (Meta only allows app-store links with its App Installs objective). Per platform:`,
-      `  • meta_ads / reddit_ads: include a short \`headline\` AND an \`image_url\` — a PUBLIC image (app icon, screenshot, or OG image; use WebFetch on the product page to find a real one). These FAIL to launch without an image.`,
-      `  • google_ads (responsive search ads): include \`headlines\` (3–15 distinct, each ≤30 chars) and \`descriptions\` (2–4 distinct, each ≤90 chars). No image needed.`,
+      `Per platform:`,
+      `  • meta_ads / reddit_ads: a WEBSITE landing-page \`link\` (NOT an App Store URL — Meta only allows those with its App Installs objective), a short \`headline\`, AND an \`image_url\` (a PUBLIC image — app icon, screenshot, or OG image; use WebFetch to find a real one). These FAIL to launch without an image.`,
+      googleObjective === 'app'
+        ? `  • google_ads — this product is a MOBILE APP, so propose APP INSTALL ads (a Google App campaign), NOT search ads: provide \`headlines\` (3–5 distinct, ≤30 chars) and \`descriptions\` (2–4 distinct, ≤90 chars) written to drive INSTALLS. The destination is the app's store listing — do NOT design keyword/search targeting, negative keywords, a website \`link\`, or an image. Title it as an app-install ad (e.g. "Google App — …"), not "Google Search".`
+        : `  • google_ads (responsive search ads): a WEBSITE \`link\` (final URL), plus \`headlines\` (3–15 distinct, ≤30 chars) and \`descriptions\` (2–4 distinct, ≤90 chars). No image needed.`,
       `The SUM of your proposed daily ad budgets must stay within the remaining budget.`,
     ].join('\n'),
     influencer: [
@@ -490,9 +493,17 @@ export async function runAgent(args: RunArgs): Promise<RunOutcome> {
     const { lines: messaging, angles: usedAngles } = messagingDigest(inScopeActions);
     const findings = listFindings(project.id)
       .map((f) => `- [${f.category}] ${f.title}: ${f.summary ?? ''}`).join('\n') || '(see saved findings)';
+    // Tell the ads agent which Google ad type fits the product: an app-store
+    // URL (or a saved 'app' objective) ⇒ App-install ads, else Search ads.
+    let googleObjective: string | null = null;
+    if (job.kind === 'ads' && connected.includes('google_ads')) {
+      const g = getConnector(project.id, 'google_ads');
+      const gs = g?.connected && g.secrets ? JSON.parse(g.secrets) : null;
+      googleObjective = gs?.objective || (parseAppStoreUrl(project.url || '') ? 'app' : 'search');
+    }
     prompt = args.resumeSessionId
       ? `Continue your role from where you left off; propose only for connected channels (${labels || 'none — stop'}). Do NOT repeat the angle/hook/opener of anything already posted; every action must be materially different. Then stop.`
-      : executionPrompt(project, job.kind, budgetLine, labels, findings, messaging, usedAngles);
+      : executionPrompt(project, job.kind, budgetLine, labels, findings, messaging, usedAngles, googleObjective);
   } else if (job.kind === 'research') {
     mcpTools = RESEARCH_TOOLS;
     prompt = args.resumeSessionId
