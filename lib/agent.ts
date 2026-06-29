@@ -147,15 +147,26 @@ function buildTools(job: Job, outcome: RunOutcome) {
 
   const checkBudget = tool(
     'check_budget',
-    'Check the campaign budget before proposing anything that costs money. Returns the hard cap, what is already committed, and what remains.',
+    'Check the campaign budget before proposing anything that costs money. Returns the total cap, the DAILY cap, what is committed, and what remains.',
     {},
     async () => {
       const c = getCampaignByProject(projectId);
       if (!c) return { content: [{ type: 'text', text: 'No active campaign.' }] };
       const d = (n: number) => (n / 100).toFixed(2);
+      const paused = (a: ActionRow) => { try { return !!JSON.parse(a.meta || '{}').ad_paused; } catch { return false; } };
+      // Daily budget already committed to currently-live (not paused) ads.
+      const liveDaily = listActions(c.id).filter((a) => a.kind === 'ad' && a.status === 'done' && !paused(a)).reduce((s, a) => s + a.cost_cents, 0);
+      const cap = c.daily_cap_cents;
       return { content: [{ type: 'text', text: JSON.stringify({
-        currency: c.currency, budget: `$${d(c.budget_cents)}`, spent_committed: `$${d(c.spent_cents)}`,
-        remaining: `$${d(c.budget_cents - c.spent_cents)}`, autonomy: c.autonomy,
+        currency: c.currency,
+        total_cap: `$${d(c.budget_cents)}`, spent_to_date: `$${d(c.spent_cents)}`, total_remaining: `$${d(c.budget_cents - c.spent_cents)}`,
+        daily_cap: cap > 0 ? `$${d(cap)}` : 'none set',
+        daily_committed_to_live_ads: `$${d(liveDaily)}`,
+        daily_budget_available_now: cap > 0 ? `$${d(Math.max(0, cap - liveDaily))}` : 'no daily cap',
+        autonomy: c.autonomy,
+        rule: cap > 0
+          ? `IMPORTANT: each ad's cost_usd is a DAILY budget. No single ad may exceed the daily cap ($${d(cap)}), and the SUM of all live ads' daily budgets must stay within it. Right now you have $${d(Math.max(0, cap - liveDaily))}/day of headroom.`
+          : `Each ad's cost_usd is a DAILY budget; keep total proposed spend within the total cap.`,
       }) }] };
     },
   );
@@ -359,7 +370,7 @@ function tacticsPolicy(p: Project, budgetLine: string): string {
     ``,
     `OPERATING RULES (non-negotiable):`,
     `• APPROVAL-GATED: You PROPOSE actions with propose_action. Nothing is published or charged until a human approves it. Never claim you have already posted, sent, or spent anything.`,
-    `• BUDGET: ${budgetLine} Call check_budget before proposing anything with a cost. Never let your proposed paid spend exceed the remaining budget. If the budget is $0, be relentlessly resourceful with free tactics; for paid channels, hunt for free ad credits/coupons and propose $0 or near-zero experiments.`,
+    `• BUDGET: ${budgetLine} Call check_budget before proposing anything with a cost. Never exceed the total remaining budget, and for ads never exceed the DAILY CAP (each ad's cost is a DAILY budget; one ad can't exceed the daily cap, and live ads' daily budgets must sum within it). If the budget is $0, be relentlessly resourceful with free tactics; for paid channels, hunt for free ad credits/coupons and propose $0 or near-zero experiments.`,
     `• MAXIMIZE TRACTION PER DOLLAR with ingenious, high-leverage tactics tailored to THIS product's ideal customer.`,
     `• VARIETY / ANTI-REPETITION (critical — repeated messaging makes accounts look like spam and gets them throttled or banned): study the "MESSAGING ALREADY PUBLISHED/QUEUED" list in your context and make EVERY new action genuinely fresh. Rotate the angle, hook, opening line, content structure (e.g. story vs. stat vs. question vs. how-to vs. hot take), length, and CTA. Never reuse a previous opener or template, never re-state the same value prop the same way. Set a distinct \`angle\` on each propose_action that is NOT in the already-used list. If you can't find a genuinely new angle for a channel, propose fewer actions rather than near-duplicates.`,
     `• ETHICS (hard limits): no spam, no fake accounts/followers/engagement, no fake reviews, no astroturfing, no bots that break platform ToS, no deceptive or misleading claims, no purchased email lists. Everything must be genuine and respect the audience. If a tactic would annoy people or risk an account ban, DO NOT propose it. Email must be opt-in friendly with a clear opt-out (CAN-SPAM/GDPR).`,
@@ -467,7 +478,7 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
       googleObjective === 'app'
         ? `  • google_ads — this product is a MOBILE APP, so propose APP INSTALL ads (a Google App campaign), NOT search ads: provide \`headlines\` (3–5 distinct, ≤30 chars), \`descriptions\` (2–4 distinct, ≤90 chars), and an \`image_url\` from the ad images above if one fits (App campaigns use image assets). The destination is the app's store listing — do NOT design keyword/search targeting, negative keywords, or a website \`link\`. Title it as an app-install ad (e.g. "Google App — …"), not "Google Search".`
         : `  • google_ads (responsive search ads): a WEBSITE \`link\` (final URL), plus \`headlines\` (3–15 distinct, ≤30 chars) and \`descriptions\` (2–4 distinct, ≤90 chars). No image needed.`,
-      `The SUM of your proposed daily ad budgets must stay within the remaining budget.`,
+      `BUDGETS: each ad's \`cost_usd\` is its DAILY budget. Call check_budget and respect the DAILY CAP: NEVER propose a single ad whose daily budget exceeds the daily cap, and keep the SUM of your proposed daily budgets within the daily cap (use the "daily_budget_available_now" figure). If the daily cap only fits one small test, propose ONE ad — don't pile on over-cap ads that will just be blocked at approval.`,
     ].join('\n'),
     influencer: [
       `YOUR ROLE — Influencer & Creator Outreach:`,
