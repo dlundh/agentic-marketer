@@ -29,10 +29,16 @@ reload or a full server restart.
   inside hard budget caps + a kill switch. The content pipeline refills itself.
 - **Native posting** to X, LinkedIn, Reddit, and Mastodon via official OAuth; an
   automation-webhook bridge for everything else.
+- **Community listening** — a per-channel agent finds where your audience is
+  already talking and proposes value-first, *disclosed* replies (always
+  human-approved; never astroturfing).
 - **Autonomous ad spend across Meta, Google & Reddit** (one shared provider
-  layer) with a total cap, daily cap, kill switch, an optimizer that pauses
-  losers, and per-ad pause/resume/remove — polled in the background so spend
-  stays in bounds.
+  layer) with a total cap, daily cap, kill switch, and a closed-loop optimizer
+  that learns from real **installs/conversions** — protecting winners, replacing
+  losers — all polled in the background so spend stays in bounds.
+- **Anti-repetition built in** — every post/ad carries a distinct messaging
+  *angle*, and the swarm sees what's already been published so accounts never
+  read as spammy or repetitive.
 - **Email outreach** with named recipient lists, CSV import, a per-project
   suppression/unsubscribe set, and `{{first_name}}`/`{{company}}` merge tokens.
 - **Steer it in plain English**: a project-level *Direction & ideas* box shapes
@@ -48,9 +54,10 @@ Browser (single page, SSE live feed)
         ▼
 Next.js API routes ──► orchestrator ──► Claude Agent SDK (query loop)
         │                   │                 │  WebSearch / WebFetch / Read
-        │                   │                 │  + custom tools:
-        │                   │                 │    save_finding, create_pdf_report,
-        │                   │                 │    mark_research_complete, mark_marketing_complete
+        │                   │                 │  + custom tools: save_finding, create_pdf_report,
+        │                   │                 │    mark_research_complete, mark_competitive_complete,
+        │                   │                 │    mark_marketing_complete, check_budget,
+        │                   │                 │    set_strategy, propose_action, submit_revision
         ▼                   ▼                 ▼
    node:sqlite  ◄────────  findings / activity / files / jobs   ──►  PDFs (pdfkit) on disk
 ```
@@ -80,6 +87,9 @@ Next.js API routes ──► orchestrator ──► Claude Agent SDK (query loop
    - **Budget is a hard ceiling.** Agents call `check_budget`; approving an action
      reserves its cost and any approval that would exceed the cap is blocked. At
      **$0** the swarm goes pure-organic and hunts for free ad credits.
+   - **No repetition** — every action declares a distinct messaging *angle*, and
+     the agent is shown the angles/openers already published so each new post or
+     ad is materially different (no spammy, copy-paste-looking feeds).
    - **Ethical guardrails** (enforced in every agent prompt): no spam, fake
      accounts/engagement/reviews, astroturfing, ToS-violating bots, deceptive
      claims, or purchased lists. Email carries an opt-out (CAN-SPAM/GDPR).
@@ -149,6 +159,10 @@ Shared behavior:
     / manual** it does *not* touch your ads — it tracks performance and surfaces a
     **"recommend pausing"** flag (one-click Pause) plus improvement proposals when
     you hit **⚡ Optimize**. Manually-started ads are optimized the same way.
+  - Conversions only report if **conversion tracking is configured** on the
+    platform (Google Ads conversions / Firebase / Play link, Meta pixel / app
+    events). If an ad gets traffic but 0 conversions, the card flags likely-missing
+    tracking and the optimizer falls back to CTR/CPC until it's set up.
 - **Per-ad controls**: pause, resume, or remove any live ad. Removing deletes the
   underlying platform campaign; the kill switch pauses everything at once.
 - Spend is always on **your** ad account with **your** billing — the app never
@@ -212,8 +226,9 @@ manual copy/paste instead.)
 - **Direction & ideas** (project level): a chat box where you add goals, angles,
   constraints, or ideas that steer the *entire* approach — injected into research,
   marketing, execution, and revision prompts.
-- **Revise** (per action): give feedback on any single proposed action and the
-  agent rewrites just that piece (revision history is kept on the action).
+- **Revise** (per action): give feedback on any single proposed action — including
+  a smart-**scheduled** post, which keeps its slot — and the agent rewrites just
+  that piece (revision history is kept on the action).
 
 ### Channels & execution
 
@@ -233,7 +248,40 @@ is saved as a note but stays publish-ready (never a fake "connected").
 
 Manage connections from the **⚙ Channels** button (top bar). The app never
 fabricates platform access — connect accounts and the same approved action that
-was "publish-ready" starts auto-executing.
+was "publish-ready" starts auto-executing. Connections are **per project**, and
+in-progress connect details survive the dialog closing / OAuth round-trip (saved
+to `sessionStorage`, cleared once connected). For handle-based social channels, a
+**✨ Create** button runs an agent that researches an available brand handle, writes
+a bio, and gives you one-click signup steps (it never bot-creates accounts).
+
+### Connecting accounts (OAuth, local HTTPS, Google Ads setup)
+
+Most platforms need a one-time developer app (the ⚙ Channels dialog shows the
+exact redirect URI + portal link). A few gotchas worth knowing:
+
+- **Local HTTPS for OAuth.** Meta and Google **reject `http://` and `localhost`
+  redirect URIs**. Two ways to satisfy them:
+  - `npm run dev:https` serves the app at `https://localhost:4400` with a locally
+    trusted cert (run `mkcert -install` once). Good for providers that accept
+    `https://localhost` (e.g. Meta's callback field).
+  - For providers that need a **public** domain, run a tunnel
+    (`ngrok http 4400` / `cloudflared tunnel --url http://localhost:4400`), set
+    `OAUTH_PUBLIC_URL` to the tunnel's https URL, register
+    `…/api/oauth/<provider>/callback` with the provider, and open the app via that
+    URL. `OAUTH_PUBLIC_URL` makes the redirect URI deterministic behind a proxy.
+- **OAuth consent screen in "Testing"** (Google) blocks anyone not on the
+  **test-users** list with a 403 — add your account, or publish the app.
+- **Google Ads setup gates** (each surfaces a clear, actionable error in-app):
+  1. **Enable the Google Ads API** in the Cloud project.
+  2. **Developer token** access level — a fresh token is *test-accounts only*;
+     apply for **Basic access** in the Google Ads API Center to manage a real
+     account.
+  3. **API version** — Google sunsets versions ~yearly; the default tracks a
+     current one and is overridable via `GOOGLE_ADS_API_VERSION`.
+  4. Provide your **Customer ID** (the ad account) and, for a manager account,
+     the **Manager (MCC) ID**. App vs. Search campaign type is auto-detected from
+     the product (App Store/Play URL ⇒ App campaign) and overridable in the
+     Google Ads config panel.
 
 ## Authentication (your Claude subscription)
 
@@ -257,11 +305,15 @@ Optional: set `AGENT_MODEL` to pin a model (defaults to your Claude Code default
 npm install
 cp .env.example .env.local   # optional — every variable is optional
 npm run dev                  # http://localhost:4400
+# or: npm run dev:https      # https://localhost:4400 (needed for Meta/Google OAuth)
 # or: npm run build && npm start
 ```
 
 Requires **Node 22.5+** (for the built-in `node:sqlite` module). All environment
-variables are optional and documented in [.env.example](.env.example).
+variables are optional and documented in [.env.example](.env.example) —
+including `OAUTH_PUBLIC_URL` (tunnels) and `GOOGLE_ADS_API_VERSION`. Connecting
+Meta/Google ad accounts needs HTTPS — see
+[Connecting accounts](#connecting-accounts-oauth-local-https-google-ads-setup).
 
 ## Persistence & resilience
 
@@ -289,8 +341,8 @@ variables are optional and documented in [.env.example](.env.example).
 | `lib/db.ts` | SQLite schema + queries: projects, jobs, per-project connectors, budget ledger, scheduling, email lists, directives |
 | `lib/orchestrator.ts` | Job lifecycle, pause/resume, phase transitions, campaign + budget controls, approve/execute, smart scheduler + ad optimizer |
 | `lib/agent.ts` | Agent SDK runner + custom tools + research/marketing/execution/revision prompts |
-| `lib/connectors.ts` | Channel catalog + execution adapters (native API / Meta ads / SMTP / webhook / manual) |
-| `lib/oauth.ts` | OAuth flows for X, LinkedIn, Reddit, Mastodon (PKCE, token refresh, posting) |
+| `lib/connectors.ts` | Channel catalog + execution adapters (native posts/replies, paid ads, SMTP, webhook, manual) |
+| `lib/oauth.ts` | OAuth flows for X, LinkedIn, Reddit, Mastodon (PKCE, token refresh, posting + replies) |
 | `lib/adproviders.ts` | Uniform ad-provider interface + registry (Meta / Google / Reddit) |
 | `lib/meta.ts` | Meta Marketing API: OAuth, campaign/adset/creative/ad creation, insights, status |
 | `lib/google.ts` | Google Ads API: OAuth + refresh, responsive-search-ad launch, insights, status |
