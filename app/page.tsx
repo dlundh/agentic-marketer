@@ -1036,6 +1036,14 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenL
           {meta.live_url && <> · <a href={meta.live_url} target="_blank" rel="noreferrer">View live ↗</a></>}
         </div>
       )}
+      {/* A 'ready' action couldn't auto-execute yet (e.g. missing config). Once
+          fixed, let the user re-run it instead of being stuck with no button. */}
+      {a.status === 'ready' && auto && (
+        <div className="action-actions">
+          <button className="approve" onClick={approve} disabled={acting}>{acting ? <><span className="spin">⟳</span> {isEmail ? 'Sending…' : 'Publishing…'}</> : <>↻ Retry{a.cost_cents > 0 ? ` & publish (${usd(a.cost_cents)})` : ''}</>}</button>
+          <button className="reject" onClick={() => onDecide(a.id, 'reject')} disabled={acting}>✕ Reject</button>
+        </div>
+      )}
       {a.kind === 'ad' && a.status === 'done' && onAdControl && (
         <div className="action-actions">
           <span className={`act-status ${meta.ad_paused ? 'as-ready' : 'as-done'}`}>{meta.ad_paused ? '⏸ paused' : '● live'}</span>

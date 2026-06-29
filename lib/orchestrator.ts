@@ -664,7 +664,7 @@ export function launchOptimizer(projectId: string) {
 // best connected channel. Returns an error string if it would bust the budget.
 export async function approveAction(actionId: string, opts: { list_id?: string } = {}): Promise<{ ok: boolean; error?: string; status?: string; detail?: string }> {
   let a = getAction(actionId);
-  if (!a || !['proposed', 'scheduled', 'failed'].includes(a.status)) return { ok: false, error: 'Action is not awaiting approval.' };
+  if (!a || !['proposed', 'scheduled', 'failed', 'ready'].includes(a.status)) return { ok: false, error: 'Action is not awaiting approval.' };
   // Attach the chosen email list before sending.
   if (opts.list_id) {
     const meta = a.meta ? JSON.parse(a.meta) : {};
