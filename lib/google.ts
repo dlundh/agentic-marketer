@@ -17,8 +17,10 @@ import type { AdProvider, AdIds, AdMetrics } from './adproviders';
 import type { AdSpec } from './meta';
 
 // API version is overridable — Google sunsets versions ~yearly, and a sunset
-// version returns a 404 HTML page (not JSON). Bump via GOOGLE_ADS_API_VERSION.
-const V = process.env.GOOGLE_ADS_API_VERSION || 'v18';
+// version returns a 404 HTML page (not JSON). Bump via GOOGLE_ADS_API_VERSION
+// when this default eventually sunsets (probe: GET googleads.googleapis.com/vNN/…
+// → 401 = live, 404 = gone).
+const V = process.env.GOOGLE_ADS_API_VERSION || 'v21';
 const API = `https://googleads.googleapis.com/${V}`;
 const OAUTH = 'https://oauth2.googleapis.com';
 export const GOOGLE_ADS_SCOPE = 'https://www.googleapis.com/auth/adwords';
