@@ -1315,20 +1315,32 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
   onDisconnect: (key: string) => void; onCreate: (channel: string) => Promise<string | null>;
   onExclude: (key: string, exclude: boolean) => void; onMetaSelect?: (sel: any) => void; projectId: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ handle: '', token: '', url: '' });
+  // In-progress connect details persist to sessionStorage (per project+channel),
+  // so closing the popup, reloading, or the OAuth round-trip doesn't wipe what
+  // you've typed. Cleared once the channel connects.
+  const draftKey = `cdraft:${projectId}:${c.key}`;
+  const loadDraft = (): any => { try { return JSON.parse(sessionStorage.getItem(draftKey) || '{}'); } catch { return {}; } };
+  const d0 = loadDraft();
+  const [open, setOpen] = useState<boolean>(!!d0.open);
+  const [f, setF] = useState(d0.f || { handle: '', token: '', url: '' });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createMsg, setCreateMsg] = useState<string | null>(null);
   const [guide, setGuide] = useState(false);
-  const [instance, setInstance] = useState('mastodon.social');
-  const [cid, setCid] = useState('');
-  const [csec, setCsec] = useState('');
-  const [gDevToken, setGDevToken] = useState('');   // Google Ads developer token
-  const [gCustomer, setGCustomer] = useState('');   // Google Ads customer id (the account that runs the ads)
-  const [gManager, setGManager] = useState('');     // Google Ads manager (MCC) id, optional → login-customer-id
-  const [webhookMode, setWebhookMode] = useState(false);
+  const [instance, setInstance] = useState(d0.instance ?? 'mastodon.social');
+  const [cid, setCid] = useState(d0.cid || '');
+  const [csec, setCsec] = useState(d0.csec || '');
+  const [gDevToken, setGDevToken] = useState(d0.gDevToken || '');   // Google Ads developer token
+  const [gCustomer, setGCustomer] = useState(d0.gCustomer || '');   // Google Ads customer id (the account that runs the ads)
+  const [gManager, setGManager] = useState(d0.gManager || '');     // Google Ads manager (MCC) id, optional → login-customer-id
+  const [webhookMode, setWebhookMode] = useState<boolean>(!!d0.webhookMode);
+
+  // Save the draft as it changes; wipe it once connected (don't keep secrets around).
+  useEffect(() => {
+    if (c.connected) { try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ } return; }
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ open, f, instance, cid, csec, gDevToken, gCustomer, gManager, webhookMode })); } catch { /* quota/private mode */ }
+  }, [c.connected, open, f, instance, cid, csec, gDevToken, gCustomer, gManager, webhookMode, draftKey]);
   const isOAuth = ['mastodon', 'x', 'reddit', 'linkedin', 'meta_ads', 'google_ads', 'reddit_ads'].includes(c.key);
   const isGoogleAds = c.key === 'google_ads';
   const redirectUri = (typeof window !== 'undefined' ? window.location.origin : '') + `/api/oauth/${c.key}/callback`;
