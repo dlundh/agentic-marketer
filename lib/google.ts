@@ -95,6 +95,19 @@ async function mutate(s: any, token: string, resource: string, operations: any[]
   return j.results?.[0]?.resourceName || '';
 }
 
+// Upload an image (fetched from a public URL) as a Google Ads IMAGE asset, for
+// App campaign creatives. Returns the asset resource name, or null on failure
+// (the ad still launches text-only). Image must meet Google's App-ad specs.
+async function uploadImageAsset(s: any, token: string, url: string): Promise<string | null> {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return null;
+    const data = Buffer.from(await r.arrayBuffer()).toString('base64');
+    const name = `creative_${url.replace(/\W+/g, '').slice(-24)}_${data.length}`;
+    return (await mutate(s, token, 'assets', [{ create: { name, type: 'IMAGE', imageAsset: { data } } }])) || null;
+  } catch { return null; }
+}
+
 // List customers the OAuth'd user can access (numeric ids), for the picker.
 export async function listGoogleCustomers(s: any): Promise<string[]> {
   const token = await accessToken(s);
@@ -157,9 +170,11 @@ export async function launchGoogleAd(s: any, spec: AdSpec): Promise<AdIds> {
     try {
       const adGroup = await mutate(s, token, 'adGroups', [{ create: { name: `${stamp} — ad group`, campaign, status: 'ENABLED' } }]);
       const { headlines, descriptions } = rsaText(spec); // app ads take ≤5 of each
-      const adGroupAd = await mutate(s, token, 'adGroupAds', [{ create: {
-        adGroup, status: 'PAUSED', ad: { appAd: { headlines: headlines.slice(0, 5), descriptions: descriptions.slice(0, 5) } },
-      } }]);
+      const appAd: any = { headlines: headlines.slice(0, 5), descriptions: descriptions.slice(0, 5) };
+      // App campaigns use image ASSETS (not a URL) — upload the chosen image first.
+      const imgAsset = spec.imageUrl ? await uploadImageAsset(s, token, spec.imageUrl) : null;
+      if (imgAsset) appAd.images = [{ asset: imgAsset }];
+      const adGroupAd = await mutate(s, token, 'adGroupAds', [{ create: { adGroup, status: 'PAUSED', ad: { appAd } } }]);
       return { campaignId: campaign, adsetId: adGroup, adId: adGroupAd, budgetId: budget };
     } catch (e) {
       try { await mutate(s, token, 'campaigns', [{ remove: campaign }]); } catch { /* best effort cleanup */ }

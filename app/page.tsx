@@ -44,6 +44,7 @@ export default function Page() {
   const [showChannels, setShowChannels] = useState(false);
   const [showJobs, setShowJobs] = useState(true);
   const [showLists, setShowLists] = useState(false);
+  const [showAdImages, setShowAdImages] = useState(false);
   const [showLaunch, setShowLaunch] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -302,6 +303,7 @@ export default function Page() {
                 onGenerate={generate}
                 onOpenChannels={() => setShowChannels(true)}
                 onOpenLists={() => setShowLists(true)}
+                onOpenAdImages={() => setShowAdImages(true)}
                 onCampaignAction={campaignAction}
                 onAdControl={adControl}
                 lists={detail.lists || []}
@@ -366,6 +368,7 @@ export default function Page() {
       {showChannels && currentId && <ChannelsModal projectId={currentId} onClose={() => setShowChannels(false)} hasCampaign={!!detail?.campaign} hasProject={!!currentId} onCreate={createAccount} />}
       {showLaunch && detail && currentId && <LaunchModal projectId={currentId} onClose={() => setShowLaunch(false)} onLaunch={launchCampaign} />}
       {showLists && currentId && <EmailListsModal projectId={currentId} onClose={() => setShowLists(false)} onChanged={() => currentId && loadDetail(currentId)} />}
+      {showAdImages && currentId && <AdImagesModal projectId={currentId} onClose={() => setShowAdImages(false)} />}
     </>
   );
 }
@@ -768,10 +771,10 @@ function AdControls({ campaign, onCampaignAction, liveAds }: { campaign: Campaig
   );
 }
 
-function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGenerate, onOpenChannels, onOpenLists, onCampaignAction, onAdControl, lists, anyExecLive }: {
+function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGenerate, onOpenChannels, onOpenLists, onOpenAdImages, onCampaignAction, onAdControl, lists, anyExecLive }: {
   campaign: Campaign; actions: ActionItem[]; onDecide: (id: string, a: 'approve' | 'reject', list_id?: string) => void;
   onRevise: (id: string, feedback: string) => void; onOptimize: () => void; onGenerate: () => void;
-  onOpenChannels: () => void; onOpenLists: () => void; onCampaignAction: (body: any) => void;
+  onOpenChannels: () => void; onOpenLists: () => void; onOpenAdImages: () => void; onCampaignAction: (body: any) => void;
   onAdControl: (id: string, a: 'pause_ad' | 'resume_ad' | 'remove_ad') => void; lists: EmailList[]; anyExecLive: boolean;
 }) {
   const [autoOnly, setAutoOnly] = useState(true);
@@ -800,6 +803,7 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
             <button className="iconbtn" onClick={onGenerate} disabled={anyExecLive} title="Generate fresh actions for your connected channels">✨ Generate actions</button>
             <button className="iconbtn" onClick={onOptimize} disabled={anyExecLive} title="Review & improve existing actions">⚡ Optimize</button>
             <button className="iconbtn" onClick={onOpenLists} title="Manage email recipient lists">✉️ Email lists</button>
+            <button className="iconbtn" onClick={onOpenAdImages} title="Images the agent can use as ad creative">🖼 Ad images</button>
           </div>
         </div>
         {campaign.budget_cents > 0 && <div className="meter"><div className="meter-fill" style={{ width: `${pct}%` }} /></div>}
@@ -1127,6 +1131,63 @@ function UseCaseBlock() {
         <pre style={{ maxHeight: 150, overflow: 'auto' }}>{X_USECASE}</pre>
       </div>
       <div className="note" style={{ fontSize: 11 }}>For the Yes/No questions (analyze X content, display Tweets off X, share data with government) answer <b>No</b>.</div>
+    </div>
+  );
+}
+
+// ----------------------------- Ad images modal ------------------------------
+type AdImage = { id: string; url: string; label: string | null };
+function AdImagesModal({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+  const [images, setImages] = useState<AdImage[]>([]);
+  const [url, setUrl] = useState('');
+  const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try { const d = await (await fetch(`/api/projects/${projectId}/ad-images`)).json(); setImages(d.images || []); } catch {}
+  }, [projectId]);
+  useEffect(() => { load(); }, [load]);
+  const add = async () => {
+    if (!url.trim()) return;
+    setBusy(true); setMsg(null);
+    const r = await fetch(`/api/projects/${projectId}/ad-images`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), label: label.trim() }) });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) { setMsg(d.error || 'Could not add.'); return; }
+    setUrl(''); setLabel(''); load();
+  };
+  const del = async (id: string) => { await fetch(`/api/projects/${projectId}/ad-images?img=${id}`, { method: 'DELETE' }); load(); };
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div><h3>🖼 Ad images</h3><div className="note">Public image URLs the agent uses as ad creative — for Meta, Reddit, and Google App campaigns. Use product shots, screenshots, your logo, or lifestyle images. (Google Search ads are text-only.) Each must be a publicly reachable <code>https://</code> URL.</div></div>
+          <button className="x" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="ad-img-add">
+            <input className="field" style={{ marginTop: 0, flex: 2, minWidth: 220 }} placeholder="https://…/product-shot.jpg" value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+            <input className="field" style={{ marginTop: 0, flex: 1, minWidth: 120 }} placeholder="label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+            <button className="approve" onClick={add} disabled={busy || !url.trim()}>{busy ? <span className="spin">⟳</span> : '＋ Add'}</button>
+          </div>
+          {msg && <div className="note" style={{ color: 'var(--red)', fontSize: 12 }}>{msg}</div>}
+          {images.length === 0 ? (
+            <div className="empty" style={{ marginTop: 12 }}>No ad images yet. Add a few and the agent will pick the best fit per ad.</div>
+          ) : (
+            <div className="ad-img-grid">
+              {images.map((im) => (
+                <div key={im.id} className="ad-img-tile">
+                  <img src={im.url} alt={im.label || ''} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0.3'; }} />
+                  <div className="ad-img-meta">
+                    <span className="ad-img-label" title={im.url}>{im.label || im.url.split('/').pop()}</span>
+                    <button className="mini danger" onClick={() => del(im.id)}>Remove</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

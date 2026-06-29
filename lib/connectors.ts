@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { getConnector, upsertConnector, activeRecipients, getProject, type ActionRow, type Connector, type Recipient } from './db';
+import { getConnector, upsertConnector, activeRecipients, getProject, adImageUrls, type ActionRow, type Connector, type Recipient } from './db';
 import { postMastodon, postX, refreshX, postReddit, refreshReddit, postLinkedin, postRedditComment, tweetIdFromUrl, mastodonIdFromUrl, redditParentFromUrl } from './oauth';
 import type { AdSpec } from './meta';
 import { isAdChannel, adProvider } from './adproviders';
@@ -325,7 +325,8 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
         dailyBudgetCents: action.cost_cents || 500,
         message: action.content || action.summary || '', headline: m.headline || action.title.slice(0, 40),
         description: m.description || '', link,
-        imageUrl: m.image_url || m.picture || s.default_image_url, cta: m.cta || 'LEARN_MORE',
+        // Prefer the action's image, then the user's ad-image pool, then the Meta default.
+        imageUrl: m.image_url || m.picture || adImageUrls(action.project_id)[0] || s.default_image_url, cta: m.cta || 'LEARN_MORE',
         headlines: m.headlines, descriptions: m.descriptions,
         countries: m.countries, ageMin: m.age_min, ageMax: m.age_max, interests: m.interests,
       };

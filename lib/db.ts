@@ -182,6 +182,17 @@ function init(): DatabaseSync {
       created_at  INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_directives_proj ON directives(project_id);
+
+    -- Per-project ad creative image pool: public image URLs the user supplies,
+    -- used as the creative for image-capable ad formats (Meta, Reddit, Google App).
+    CREATE TABLE IF NOT EXISTS ad_images (
+      id          TEXT PRIMARY KEY,
+      project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      url         TEXT NOT NULL,
+      label       TEXT,
+      created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ad_images_proj ON ad_images(project_id);
   `);
 
   // Migrations: add columns to DBs created before they existed.
@@ -544,6 +555,18 @@ export function addDirective(projectId: string, text: string): Directive {
 }
 export const listDirectives = (projectId: string) =>
   db.prepare(`SELECT * FROM directives WHERE project_id=? ORDER BY created_at ASC`).all(projectId) as Directive[];
+
+// --- ad creative images (per project) ---------------------------------------
+export type AdImage = { id: string; project_id: string; url: string; label: string | null; created_at: number };
+export function addAdImage(projectId: string, url: string, label?: string): AdImage {
+  const id = uid('img_'); const t = now();
+  db.prepare(`INSERT INTO ad_images (id,project_id,url,label,created_at) VALUES (?,?,?,?,?)`).run(id, projectId, url.trim(), label?.trim() || null, t);
+  return { id, project_id: projectId, url: url.trim(), label: label?.trim() || null, created_at: t };
+}
+export const listAdImages = (projectId: string) =>
+  db.prepare(`SELECT * FROM ad_images WHERE project_id=? ORDER BY created_at ASC`).all(projectId) as AdImage[];
+export const deleteAdImage = (id: string) => { db.prepare(`DELETE FROM ad_images WHERE id=?`).run(id); };
+export const adImageUrls = (projectId: string): string[] => listAdImages(projectId).map((r) => r.url);
 // Formatted block for injecting into agent prompts.
 export function directivesText(projectId: string): string {
   const ds = listDirectives(projectId);

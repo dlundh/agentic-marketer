@@ -279,6 +279,14 @@ a { color: var(--accent); }
 .aw-bar span { position: absolute; left: 0; top: 0; height: 100%; width: 35%; background: var(--accent); border-radius: 2px; animation: awSlide 1.5s ease-in-out infinite; }
 @keyframes awSlide { 0% { left: -35%; } 100% { left: 100%; } }
 .empty-working { color: var(--accent); border-color: rgba(124,124,240,.4); display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+
+/* Ad images manager */
+.ad-img-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ad-img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 14px; }
+.ad-img-tile { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg-soft); }
+.ad-img-tile img { width: 100%; height: 110px; object-fit: cover; display: block; background: var(--panel); }
+.ad-img-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; }
+.ad-img-label { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .auto-banner-stats { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--muted); }
 .auto-banner-stats b { color: var(--text); }
 .comp-panel { margin: 10px 0 0; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg-soft); }

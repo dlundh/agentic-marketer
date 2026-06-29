@@ -140,6 +140,11 @@ auto-approved) ad actions launch real, initially-paused campaigns, then activate
 
 Shared behavior:
 
+- **Ad creative images** — add a pool of public image URLs under **🖼 Ad images**
+  (product shots, screenshots, logo). The agent picks the best fit per ad and the
+  launcher uses it: Meta as the link image, Reddit as the thumbnail, Google **App**
+  campaigns by uploading it as an image asset. (Google **Search** ads are
+  text-only.) With no pool, the agent finds an image from the product page.
 - **Fund / defund** the campaign budget; **total cap** + **daily cap** are hard
   limits enforced by a background poller that syncs real spend from each platform.
 - **Autonomy modes**: approve every ad · approve the first then auto · fully
