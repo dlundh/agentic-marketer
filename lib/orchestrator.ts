@@ -561,6 +561,28 @@ const AD_MIN_IMPRESSIONS = 800;     // …or under this much reach
 const AD_CTR_FLOOR = 0.004;         // < 0.4% click-through = underperforming
 const AD_DEAD_SPEND_CENTS = 1500;   // ≥ $15 spent with zero clicks = dead, pause regardless
 
+// Closed-loop iteration: when fully-autonomous and pausing losers has left the
+// campaign below a healthy number of LIVE ads (and budget remains), spawn the
+// paid specialist to propose fresh, performance-informed replacements. The ads
+// agent sees the live/paused performance digest, so each new batch is a
+// deliberate improvement; autonomous mode then auto-approves + launches them.
+const AD_TARGET_LIVE = 3;                       // keep ~this many live ads in rotation
+const AD_ITERATE_COOLDOWN_MS = 6 * 60 * 60 * 1000; // don't regenerate more than every 6h
+function maybeRegenerateAds(projectId: string) {
+  const c = getCampaignByProject(projectId);
+  if (!c || c.status !== 'active' || c.autonomy !== 'autonomous') return; // only fully-auto self-heals
+  if (c.budget_cents - c.spent_cents < 100) return; // < $1 left — nothing to test with
+  const actions = listActions(c.id);
+  const inRotation = actions.filter((a) => a.kind === 'ad' && (a.status === 'proposed' || (a.status === 'done' && !parseMeta(a.meta).ad_paused))).length;
+  if (inRotation >= AD_TARGET_LIVE) return; // enough live/pending ads already
+  if (listJobs(projectId).some((j) => j.phase === 'execution' && (j.status === 'running' || j.status === 'queued'))) return; // don't stack
+  if (!autoChannels(projectId).some((k) => channelDef(k).category === 'paid')) return; // no paid channel connected
+  const it: Record<string, number> = ((globalThis as any).__adIterate ||= {});
+  if (Date.now() - (it[projectId] || 0) < AD_ITERATE_COOLDOWN_MS) return;
+  it[projectId] = Date.now();
+  spawnRoles(projectId, ['ads'], false); // propose fresh replacements; autoApproveAds launches them
+}
+
 // Pull real spend + per-ad performance from Meta, update the ledger, hard-stop
 // at the cap, and (unless in manual 'approval' mode) auto-pause ads that have
 // had a fair test but are clearly underperforming. Safe to call on a schedule.
@@ -612,6 +634,7 @@ export async function runAdOptimizer(projectId: string): Promise<AdSyncResult> {
     if (c.budget_cents > 0 && total >= c.budget_cents) await setKillSwitch(projectId, true); // hard stop at the cap
   }
   if (disconnected.size) issues.unshift(`${[...disconnected].join(', ')} ${disconnected.size === 1 ? 'is' : 'are'} not connected — reconnect under ⚙ Channels to sync real spend.`);
+  maybeRegenerateAds(projectId); // self-heal: replace paused losers with fresh, performance-informed ads
   emitEvent({ type: 'project', projectId });
   return { ok: synced > 0 || liveAds.length === 0, liveAds: liveAds.length, synced, spentCents: synced > 0 ? total : c.spent_cents, issues };
 }

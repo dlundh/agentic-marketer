@@ -391,6 +391,24 @@ function messagingDigest(actions: ActionRow[]): { lines: string; angles: string[
   return { lines, angles: [...angles] };
 }
 
+// What our live/paused ads have actually done, so the ads + optimizer agents can
+// iterate toward a better campaign: reuse winning angles, drop losers, replace
+// paused ads with deliberate improvements.
+function adPerformanceDigest(campaignId: string): string {
+  const ads = listActions(campaignId).filter((a) => a.kind === 'ad' && a.status === 'done');
+  const rows: string[] = [];
+  for (const a of ads) {
+    let m: any = {}; try { m = a.meta ? JSON.parse(a.meta) : {}; } catch { /* skip */ }
+    const p = m.perf;
+    if (!p) continue;
+    const ctr = p.impressions ? `${(((p.clicks || 0) / p.impressions) * 100).toFixed(2)}% CTR` : 'no impressions yet';
+    const cpc = p.clicks ? `$${(((p.spend_cents || 0) / 100) / p.clicks).toFixed(2)} CPC` : 'no clicks';
+    const state = m.ad_paused ? `PAUSED${m.paused_reason ? ` — ${m.paused_reason}` : ''}` : 'LIVE';
+    rows.push(`- [${a.channel}] ${m.angle ? `angle "${m.angle}": ` : ''}${state} · ${ctr} · ${cpc} · $${((p.spend_cents || 0) / 100).toFixed(2)} spent / ${p.clicks || 0} clicks / ${p.impressions || 0} impressions`);
+  }
+  return rows.length ? rows.slice(-30).join('\n') : '';
+}
+
 function executionPrompt(p: Project, role: string, budgetLine: string, channelLabels: string, findings: string, messaging = '', usedAngles: string[] = [], googleObjective: string | null = null): string {
   const head = tacticsPolicy(p, budgetLine);
   const scopeLine = channelLabels
@@ -402,7 +420,14 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
   const compLine = /\[competitor\]|Competitive advantage/i.test(findings)
     ? `\nUSE THE COMPETITIVE INTEL ABOVE: attack the gaps competitors are missing, lean into channels/angles they underuse, and differentiate — never just copy them.`
     : '';
-  const ctx = `${directionBlock(p.id)}\nRESEARCH & PLAN CONTEXT:\n${findings}\n${p.summary ? `\nOverall strategy: ${p.summary}` : ''}${compLine}\n\n${scopeLine}${dupeLine}\n`;
+  // Closed-loop learning: show real ad results to the ads/optimizer roles so each
+  // new ad is a deliberate step toward a better campaign.
+  const camp = role === 'ads' || role === 'optimizer' ? getCampaignByProject(p.id) : null;
+  const perf = camp ? adPerformanceDigest(camp.id) : '';
+  const perfBlock = perf
+    ? `\nAD PERFORMANCE SO FAR — iterate toward the best campaign, don't start from scratch:\n• KEEP/SCALE the angles & hooks with the highest CTR and lowest CPC — propose fresh variants that push those further.\n• STOP using angles that were paused or have low CTR — don't re-propose them.\n• For each PAUSED ad, propose ONE materially better replacement (sharper hook, tighter audience, clearer value) — explain in the rationale what you changed and why it should beat it.\n${perf}\n`
+    : '';
+  const ctx = `${directionBlock(p.id)}\nRESEARCH & PLAN CONTEXT:\n${findings}\n${p.summary ? `\nOverall strategy: ${p.summary}` : ''}${compLine}${perfBlock}\n\n${scopeLine}${dupeLine}\n`;
   const jobByRole: Record<string, string> = {
     strategist: [
       `YOUR ROLE — Growth Strategist:`,
