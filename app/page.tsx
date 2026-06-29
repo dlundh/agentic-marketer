@@ -19,7 +19,7 @@ type Directive = { id: string; text: string; created_at: number };
 type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[]; lists?: EmailList[]; directives?: Directive[] };
 type Auth = { connected: boolean; method: string; detail: string };
 type MetaSel = { accounts: { id: string; name: string }[]; pages: { id: string; name: string }[]; ad_account_id: string; page_id: string; default_image_url: string; default_link: string; handle: string };
-type GoogleSel = { customer_id: string; login_customer_id: string; default_link: string };
+type GoogleSel = { customer_id: string; login_customer_id: string; default_link: string; objective?: string; app_id?: string; app_store?: string; detected_app?: boolean };
 type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean; excluded?: boolean; meta?: MetaSel; gads?: GoogleSel };
 
 // ----------------------------- helpers --------------------------------------
@@ -1318,9 +1318,39 @@ function GoogleConfig({ gads, onSelect }: { gads: GoogleSel; onSelect: (sel: any
   const [customer, setCustomer] = useState(gads.customer_id || '');
   const [manager, setManager] = useState(gads.login_customer_id || '');
   const [link, setLink] = useState(gads.default_link || '');
+  const [objective, setObjective] = useState(gads.objective || 'search');
+  const [appId, setAppId] = useState(gads.app_id || '');
+  const [appStore, setAppStore] = useState(gads.app_store || (/^\d+$/.test(gads.app_id || '') ? 'APPLE_APP_STORE' : gads.app_id ? 'GOOGLE_APP_STORE' : 'GOOGLE_APP_STORE'));
+  const isApp = objective === 'app';
   return (
     <div className="meta-cfg">
       <div className="note" style={{ fontSize: 11.5, fontWeight: 600 }}>Ad spend settings</div>
+      <label className="meta-field"><span>What to promote</span>
+        <select className="list-select" value={objective} onChange={(e) => { setObjective(e.target.value); onSelect({ objective: e.target.value }); }}>
+          <option value="search">Website / Search ads</option>
+          <option value="app">Mobile app installs (App campaign)</option>
+        </select>
+      </label>
+      {gads.detected_app && objective === 'app' && <div className="note" style={{ fontSize: 11 }}>Auto-detected an app store link for this product → defaulted to an App campaign.</div>}
+      {isApp ? (
+        <>
+          <label className="meta-field"><span>App store</span>
+            <select className="list-select" value={appStore} onChange={(e) => { setAppStore(e.target.value); onSelect({ app_store: e.target.value }); }}>
+              <option value="GOOGLE_APP_STORE">Google Play</option>
+              <option value="APPLE_APP_STORE">Apple App Store</option>
+            </select>
+          </label>
+          <label className="meta-field"><span>App ID</span>
+            <input className="field" style={{ marginTop: 0 }} placeholder="Play: com.your.app · Apple: 1234567890" value={appId} onChange={(e) => setAppId(e.target.value)} />
+            <button className="mini" onClick={() => onSelect({ app_id: appId.trim() })}>Save</button>
+          </label>
+        </>
+      ) : (
+        <label className="meta-field"><span>Default destination URL</span>
+          <input className="field" style={{ marginTop: 0 }} placeholder="https://your-landing-page.com" value={link} onChange={(e) => setLink(e.target.value)} />
+          <button className="mini" onClick={() => onSelect({ default_link: link.trim() })}>Save</button>
+        </label>
+      )}
       <label className="meta-field"><span>Customer ID</span>
         <input className="field" style={{ marginTop: 0 }} placeholder="123-456-7890 (the ad account that runs ads)" value={customer} onChange={(e) => setCustomer(e.target.value)} />
         <button className="mini" onClick={() => onSelect({ customer_id: customer })}>Save</button>
@@ -1329,11 +1359,11 @@ function GoogleConfig({ gads, onSelect }: { gads: GoogleSel; onSelect: (sel: any
         <input className="field" style={{ marginTop: 0 }} placeholder="optional — manager account id" value={manager} onChange={(e) => setManager(e.target.value)} />
         <button className="mini" onClick={() => onSelect({ login_customer_id: manager })}>Save</button>
       </label>
-      <label className="meta-field"><span>Default destination URL</span>
-        <input className="field" style={{ marginTop: 0 }} placeholder="https://your-landing-page.com" value={link} onChange={(e) => setLink(e.target.value)} />
-        <button className="mini" onClick={() => onSelect({ default_link: link.trim() })}>Save</button>
-      </label>
-      <div className="note" style={{ fontSize: 11 }}>Each approved ad creates its own Google campaign → ad group → responsive search ad under this customer account (no campaign to pick). Search ads use headlines/descriptions — no image needed. The destination URL is the fallback landing page when an ad doesn’t specify one.</div>
+      <div className="note" style={{ fontSize: 11 }}>
+        {isApp
+          ? 'App campaigns drive installs from your store listing — no website link or image needed; the agent’s headlines/descriptions become the ad assets. Each approved ad creates its own App campaign under this account.'
+          : 'Search ads link to the destination URL (fallback when an ad doesn’t specify one) and use headlines/descriptions — no image. Each approved ad creates its own campaign under this account.'}
+      </div>
     </div>
   );
 }

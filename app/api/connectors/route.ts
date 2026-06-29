@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { listConnectors, upsertConnector, disconnectConnector, setConnectorExcluded, updateConnectorSecrets, getConnector } from '@/lib/db';
+import { listConnectors, upsertConnector, disconnectConnector, setConnectorExcluded, updateConnectorSecrets, getConnector, getProject } from '@/lib/db';
 import { CHANNELS, seedConnectors, channelDef, pingWebhook, verifySmtp } from '@/lib/connectors';
 import { listAdAccounts, listPages } from '@/lib/meta';
+import { parseAppStoreUrl } from '@/lib/google';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -24,7 +25,14 @@ export async function GET(req: Request) {
     }
     if (ch.key === 'google_ads' && row?.connected && row.secrets) {
       const s = JSON.parse(row.secrets); // never expose tokens — only the account config
-      base.gads = { customer_id: s.customer_id || '', login_customer_id: s.login_customer_id || '', default_link: s.default_link || '' };
+      const det = parseAppStoreUrl(getProject(projectId)?.url || ''); // auto-detect app vs website from the product
+      base.gads = {
+        customer_id: s.customer_id || '', login_customer_id: s.login_customer_id || '', default_link: s.default_link || '',
+        objective: s.objective || (det ? 'app' : 'search'),
+        app_id: s.app_id || det?.appId || '',
+        app_store: s.app_store || det?.store || '',
+        detected_app: !!det,
+      };
     }
     return base;
   });
@@ -69,7 +77,7 @@ export async function POST(req: Request) {
 
   if (body.select && key === 'google_ads') {
     const patch: any = {};
-    for (const f of ['customer_id', 'login_customer_id', 'default_link'] as const) {
+    for (const f of ['customer_id', 'login_customer_id', 'default_link', 'objective', 'app_id', 'app_store'] as const) {
       if (body.select[f] !== undefined) patch[f] = String(body.select[f]).trim();
     }
     updateConnectorSecrets(projectId, 'google_ads', patch);

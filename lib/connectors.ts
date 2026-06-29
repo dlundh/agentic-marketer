@@ -3,6 +3,7 @@ import { getConnector, upsertConnector, activeRecipients, getProject, type Actio
 import { postMastodon, postX, refreshX, postReddit, refreshReddit, postLinkedin, postRedditComment, tweetIdFromUrl, mastodonIdFromUrl, redditParentFromUrl } from './oauth';
 import type { AdSpec } from './meta';
 import { isAdChannel, adProvider } from './adproviders';
+import { parseAppStoreUrl } from './google';
 
 // ---------------------------------------------------------------------------
 // Channel catalog + execution adapters.
@@ -297,13 +298,24 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
     // PAUSED campaign via the channel's provider, then activate it.
     if (isAdChannel(action.channel)) {
       const provider = adProvider(action.channel)!;
-      const s = ownSecrets;
+      let s = ownSecrets;
       if (!s?.access_token) {
         return { status: 'ready', detail: `Ad campaign prepared. Connect ${def.label} under ⚙ Channels (finish that platform's API approval, then pick your ad account) to launch it for real.` };
       }
+      // Google: if the objective wasn't set explicitly, infer it from the product —
+      // an app-store URL ⇒ App campaign (installs); otherwise a Search campaign.
+      if (action.channel === 'google_ads' && !s.objective) {
+        const det = parseAppStoreUrl(getProject(action.project_id)?.url || '');
+        if (det) s = { ...s, objective: 'app', app_id: s.app_id || det.appId, app_store: s.app_store || det.store };
+      }
       const m = safeJSON(action.meta) || {};
       const link = m.link || s.default_link || getProject(action.project_id)?.url || '';
-      if (!link) return { status: 'ready', detail: 'Ad is ready but has no destination URL — add a link before launching.' };
+      // Google App campaigns drive installs from the store listing — no website link needed.
+      const isGoogleApp = action.channel === 'google_ads' && s.objective === 'app';
+      if (!link && !isGoogleApp) return { status: 'ready', detail: 'Ad is ready but has no destination URL — add a link before launching.' };
+      if (isGoogleApp && !s.app_id) {
+        return { status: 'ready', detail: 'This is set to an App campaign but no app store ID is set — add it under ⚙ Channels → Google Ads (App installs), then approve.' };
+      }
       // App Store URLs are a Meta-objective limitation specifically.
       if (action.channel === 'meta_ads' && /\b(apps\.apple\.com|itunes\.apple\.com|play\.google\.com)\b/i.test(link)) {
         return { status: 'ready', detail: 'This ad points to an App Store URL — Meta only allows those with the App Installs objective. Set a website "Default ad destination URL" under ⚙ Channels → Meta Ads (e.g. your landing page), then approve.' };

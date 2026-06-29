@@ -121,8 +121,11 @@ work identically across all of them. Connect an ad account and approved (or
 auto-approved) ad actions launch real, initially-paused campaigns, then activate:
 
 - **Meta Ads** — Marketing API (Facebook/Instagram). Single headline + creative image.
-- **Google Ads** — responsive search ads (3–15 headlines, 2–4 descriptions). Needs
-  a developer token + customer id.
+- **Google Ads** — picks the campaign type from what you're marketing: a **Search
+  campaign** (responsive search ad → website) for a site/SaaS, or an **App
+  campaign** (installs from the store listing) for a mobile app. App vs website is
+  auto-detected from an App Store / Google Play URL and is overridable under ⚙
+  Channels → Google Ads. Needs a developer token + customer id.
 - **Reddit Ads** — promoted link posts. Reddit's Ads API is approval-gated.
 
 Shared behavior:

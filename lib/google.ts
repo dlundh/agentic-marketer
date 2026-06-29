@@ -95,7 +95,21 @@ function rsaText(spec: AdSpec): { headlines: { text: string }[]; descriptions: {
   return { headlines: heads.slice(0, 15).map((text) => ({ text })), descriptions: descs.slice(0, 4).map((text) => ({ text })) };
 }
 
-// Create a PAUSED budget → campaign → ad group → responsive search ad.
+// Parse an app store id + store enum from a store URL (for App campaigns).
+//   apps.apple.com/.../id1234567890   → { appId: '1234567890', store: 'APPLE_APP_STORE' }
+//   play.google.com/store/apps/details?id=com.foo.bar → { appId: 'com.foo.bar', store: 'GOOGLE_APP_STORE' }
+export function parseAppStoreUrl(url: string): { appId: string; store: 'APPLE_APP_STORE' | 'GOOGLE_APP_STORE' } | null {
+  if (!url) return null;
+  const ios = url.match(/apps\.apple\.com\/.*\/id(\d+)/i) || url.match(/itunes\.apple\.com\/.*\/id(\d+)/i);
+  if (ios) return { appId: ios[1], store: 'APPLE_APP_STORE' };
+  const play = url.match(/play\.google\.com\/store\/apps\/details\?.*\bid=([\w.]+)/i);
+  if (play) return { appId: play[1], store: 'GOOGLE_APP_STORE' };
+  return null;
+}
+
+// Create a PAUSED campaign of the right TYPE for what's being marketed:
+//   • objective 'app'  → App campaign (drives installs from the store listing)
+//   • otherwise        → Search campaign with a responsive search ad to a website
 export async function launchGoogleAd(s: any, spec: AdSpec): Promise<AdIds> {
   const token = await accessToken(s);
   const cid = digits(s.customer_id);
@@ -107,6 +121,31 @@ export async function launchGoogleAd(s: any, spec: AdSpec): Promise<AdIds> {
   const budget = await mutate(s, token, 'campaignBudgets', [{ create: {
     name: `${stamp} — budget`, amountMicros: String(micros), deliveryMethod: 'STANDARD', explicitlyShared: false,
   } }]);
+
+  // ---- App campaign (mobile app installs) ----
+  if (s.objective === 'app') {
+    if (!s.app_id) throw new Error('App campaign needs the app’s store ID — set it under ⚙ Channels → Google Ads.');
+    const appStore = s.app_store === 'APPLE_APP_STORE' || s.app_store === 'GOOGLE_APP_STORE'
+      ? s.app_store : (/^\d+$/.test(String(s.app_id)) ? 'APPLE_APP_STORE' : 'GOOGLE_APP_STORE');
+    const campaign = await mutate(s, token, 'campaigns', [{ create: {
+      name: stamp, status: 'PAUSED', advertisingChannelType: 'MULTI_CHANNEL', advertisingChannelSubType: 'APP_CAMPAIGN',
+      campaignBudget: budget,
+      appCampaignSetting: { appId: String(s.app_id), appStore, biddingStrategyGoalType: 'OPTIMIZE_INSTALLS_WITHOUT_TARGET_INSTALL_COST' },
+    } }]);
+    try {
+      const adGroup = await mutate(s, token, 'adGroups', [{ create: { name: `${stamp} — ad group`, campaign, status: 'ENABLED' } }]);
+      const { headlines, descriptions } = rsaText(spec); // app ads take ≤5 of each
+      const adGroupAd = await mutate(s, token, 'adGroupAds', [{ create: {
+        adGroup, status: 'PAUSED', ad: { appAd: { headlines: headlines.slice(0, 5), descriptions: descriptions.slice(0, 5) } },
+      } }]);
+      return { campaignId: campaign, adsetId: adGroup, adId: adGroupAd, budgetId: budget };
+    } catch (e) {
+      try { await mutate(s, token, 'campaigns', [{ remove: campaign }]); } catch { /* best effort cleanup */ }
+      throw e;
+    }
+  }
+
+  // ---- Search campaign (website traffic) — default ----
   const campaign = await mutate(s, token, 'campaigns', [{ create: {
     name: stamp, status: 'PAUSED', advertisingChannelType: 'SEARCH', campaignBudget: budget,
     manualCpc: {}, networkSettings: { targetGoogleSearch: true, targetSearchNetwork: true, targetContentNetwork: false },
