@@ -269,6 +269,7 @@ export default function Page() {
               {' '}<PhaseChip phase={detail.project.phase} />
               {!showJobs && <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· {detail.jobs.length} agent{detail.jobs.length === 1 ? '' : 's'} hidden</span>}
             </h2>
+            <AgentsWorking jobs={detail.jobs} />
             <DirectionBox directives={detail.directives || []} onAdd={addDirection} />
             <CompetitivePanel
               analyzed={detail.findings.filter((f) => f.category === 'competitor').length}
@@ -400,6 +401,23 @@ function CompetitivePanel({ analyzed, files, live, onRun }: {
           {analyzed > 0 && <span className="note" style={{ fontSize: 11 }}>Already-analyzed competitors are excluded automatically.</span>}
         </div>
       )}
+    </div>
+  );
+}
+
+// Prominent, animated indicator that agents are actively working (any phase).
+function AgentsWorking({ jobs }: { jobs: Job[] }) {
+  const live = jobs.filter((j) => j.live);
+  if (!live.length) return null;
+  const what = live.map((j) => j.title.split('—')[0].trim()).filter(Boolean).slice(0, 3).join(' · ');
+  return (
+    <div className="agents-working" role="status" aria-live="polite">
+      <div className="aw-orb"><span className="aw-ring" /><span className="aw-ring" /><span className="aw-core" /></div>
+      <div className="aw-text">
+        <div className="aw-title">{live.length} agent{live.length === 1 ? '' : 's'} working<span className="aw-dots"><i /><i /><i /></span></div>
+        {what && <div className="aw-sub">{what}</div>}
+      </div>
+      <div className="aw-bar"><span /></div>
     </div>
   );
 }
@@ -823,7 +841,9 @@ function CampaignPanel({ campaign, actions, onDecide, onRevise, onOptimize, onGe
             Only show actions I can auto-publish
           </label>
         </div>
-        {proposed.length === 0 && <div className="empty" style={{ padding: 18 }}>{anyExecLive ? 'Agents are still working…' : autoOnly && hiddenManual > 0 ? 'No auto-publishable actions yet — connect more channels under ⚙ Channels.' : 'No actions waiting.'}</div>}
+        {proposed.length === 0 && (anyExecLive
+          ? <div className="empty empty-working" style={{ padding: 18 }}><span className="spin">⟳</span> Agents are still working<span className="aw-dots"><i /><i /><i /></span> new actions will appear here as they’re proposed.</div>
+          : <div className="empty" style={{ padding: 18 }}>{autoOnly && hiddenManual > 0 ? 'No auto-publishable actions yet — connect more channels under ⚙ Channels.' : 'No actions waiting.'}</div>)}
         {proposed.map((a) => <ActionCard key={a.id} a={a} onDecide={onDecide} onRevise={onRevise} onOpenChannels={onOpenChannels} lists={lists} onOpenLists={onOpenLists} onAdControl={onAdControl} />)}
         {hiddenManual > 0 && (
           <div className="note" style={{ fontSize: 12, marginTop: 8 }}>

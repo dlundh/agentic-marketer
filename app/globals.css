@@ -248,6 +248,37 @@ a { color: var(--accent); }
 .auto-banner-head { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
 .auto-banner-head .fa-on { font-size: 12.5px; font-weight: 700; }
 .auto-working { font-size: 11.5px; color: var(--accent); display: inline-flex; align-items: center; gap: 5px; }
+
+/* Prominent "agents working" banner */
+.agents-working {
+  display: flex; align-items: center; gap: 14px; margin: 12px 0;
+  padding: 14px 16px; border-radius: 14px; position: relative; overflow: hidden;
+  border: 1px solid rgba(124,124,240,.45);
+  background: linear-gradient(100deg, rgba(124,124,240,.16), rgba(124,124,240,.05));
+  box-shadow: 0 0 0 0 rgba(124,124,240,.45);
+  animation: awGlow 2.2s ease-in-out infinite;
+}
+@keyframes awGlow {
+  0%,100% { box-shadow: 0 0 18px -6px rgba(124,124,240,.55); border-color: rgba(124,124,240,.4); }
+  50%     { box-shadow: 0 0 30px 0   rgba(124,124,240,.85); border-color: rgba(124,124,240,.85); }
+}
+.aw-orb { position: relative; width: 30px; height: 30px; flex-shrink: 0; }
+.aw-core { position: absolute; inset: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.aw-ring { position: absolute; inset: 4px; border-radius: 50%; border: 2px solid var(--accent); opacity: 0; animation: awRing 1.8s ease-out infinite; }
+.aw-ring:nth-child(2) { animation-delay: .9s; }
+@keyframes awRing { 0% { transform: scale(.5); opacity: .9; } 100% { transform: scale(1.6); opacity: 0; } }
+.aw-text { flex: 1; min-width: 0; }
+.aw-title { font-weight: 700; font-size: 14px; display: flex; align-items: baseline; }
+.aw-sub { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aw-dots { display: inline-flex; gap: 3px; margin-left: 4px; }
+.aw-dots i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .35; animation: awDot 1.2s ease-in-out infinite; }
+.aw-dots i:nth-child(2) { animation-delay: .2s; }
+.aw-dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes awDot { 0%,100% { opacity: .25; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+.aw-bar { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: rgba(124,124,240,.15); overflow: hidden; }
+.aw-bar span { position: absolute; left: 0; top: 0; height: 100%; width: 35%; background: var(--accent); border-radius: 2px; animation: awSlide 1.5s ease-in-out infinite; }
+@keyframes awSlide { 0% { left: -35%; } 100% { left: 100%; } }
+.empty-working { color: var(--accent); border-color: rgba(124,124,240,.4); display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .auto-banner-stats { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--muted); }
 .auto-banner-stats b { color: var(--text); }
 .comp-panel { margin: 10px 0 0; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg-soft); }
