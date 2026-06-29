@@ -118,6 +118,52 @@ export async function launchMetaAd(token: string, actId: string, pageId: string,
   }
 }
 
+// App Promotion campaign (drives installs to the store listing). Needs a Meta App
+// ID (the marketed app registered in Meta's App Dashboard) + its store URL.
+// Created PAUSED. Same to-spec/validate-live caveat as the rest of the ad code.
+export async function launchMetaAppAd(token: string, actId: string, pageId: string, appId: string, storeUrl: string, spec: AdSpec) {
+  const act = `act_${actId.replace(/^act_/, '')}`;
+  const isIos = /apps\.apple\.com|itunes\.apple\.com/i.test(storeUrl);
+  const campaign = await gpost(`/${act}/campaigns`, token, {
+    name: spec.name, objective: 'OUTCOME_APP_PROMOTION', status: 'PAUSED',
+    special_ad_categories: [], is_adset_budget_sharing_enabled: false,
+  });
+  try {
+    const targeting: any = {
+      geo_locations: { countries: spec.countries?.length ? spec.countries : ['US'] },
+      user_os: [isIos ? 'iOS' : 'Android'], // app installs target a single OS
+    };
+    if (spec.ageMin) targeting.age_min = spec.ageMin;
+    if (spec.ageMax) targeting.age_max = spec.ageMax;
+    if (spec.interests?.length) targeting.flexible_spec = [{ interests: spec.interests.map((i) => ({ name: i })) }];
+    const adset = await gpost(`/${act}/adsets`, token, {
+      name: `${spec.name} — ad set`, campaign_id: campaign.id, status: 'PAUSED',
+      daily_budget: String(spec.dailyBudgetCents), billing_event: 'IMPRESSIONS',
+      optimization_goal: 'APP_INSTALLS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+      promoted_object: { application_id: appId, object_store_url: storeUrl },
+      targeting,
+    });
+    const creative = await gpost(`/${act}/adcreatives`, token, {
+      name: `${spec.name} — creative`,
+      object_story_spec: {
+        page_id: pageId,
+        link_data: {
+          message: spec.message, link: storeUrl, name: spec.headline,
+          description: spec.description || '', picture: spec.imageUrl || undefined,
+          call_to_action: { type: 'INSTALL_MOBILE_APP', value: { link: storeUrl, application: appId } },
+        },
+      },
+    });
+    const ad = await gpost(`/${act}/ads`, token, {
+      name: `${spec.name} — ad`, adset_id: adset.id, creative: { creative_id: creative.id }, status: 'PAUSED',
+    });
+    return { campaignId: campaign.id, adsetId: adset.id, creativeId: creative.id, adId: ad.id };
+  } catch (e) {
+    await gdelete(campaign.id, token);
+    throw e;
+  }
+}
+
 // Flip an entity (campaign/adset/ad) ACTIVE or PAUSED.
 export async function setMetaStatus(token: string, id: string, status: 'ACTIVE' | 'PAUSED') {
   return gpost(`/${id}`, token, { status });
@@ -143,6 +189,12 @@ export const metaProvider: AdProvider = {
   async launch(s, spec) {
     if (!s?.ad_account_id || !s?.page_id) throw new Error('Pick your Meta ad account and Page under ⚙ Channels first.');
     if (!spec.imageUrl) throw new Error('Meta ads need a creative image — add one to the action or set a default image URL.');
+    if (s.objective === 'app') {
+      if (!s.meta_app_id) throw new Error('Meta app-install needs your Meta App ID — register the app in Meta and set it under ⚙ Channels → Meta Ads.');
+      const storeUrl = s.app_store_url || spec.link;
+      if (!storeUrl) throw new Error('Meta app-install needs the app’s store URL.');
+      return await launchMetaAppAd(s.access_token, s.ad_account_id, s.page_id, s.meta_app_id, storeUrl, spec);
+    }
     return await launchMetaAd(s.access_token, s.ad_account_id, s.page_id, spec);
   },
   async setStatus(s, ids, status) {

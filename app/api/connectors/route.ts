@@ -21,7 +21,15 @@ export async function GET(req: Request) {
     };
     if (ch.key === 'meta_ads' && row?.connected && row.secrets) {
       const s = JSON.parse(row.secrets);
-      base.meta = { accounts: s.accounts || [], pages: s.pages || [], ad_account_id: s.ad_account_id || '', page_id: s.page_id || '', default_image_url: s.default_image_url || '', default_link: s.default_link || '', handle: s.handle || '' };
+      const det = parseAppStoreUrl(getProject(projectId)?.url || ''); // app vs website from the product
+      base.meta = {
+        accounts: s.accounts || [], pages: s.pages || [], ad_account_id: s.ad_account_id || '', page_id: s.page_id || '',
+        default_image_url: s.default_image_url || '', default_link: s.default_link || '', handle: s.handle || '',
+        objective: s.objective || (det ? 'app' : 'traffic'),
+        meta_app_id: s.meta_app_id || '',
+        app_store_url: s.app_store_url || (det ? (getProject(projectId)?.url || '') : ''),
+        detected_app: !!det,
+      };
     }
     if (ch.key === 'google_ads' && row?.connected && row.secrets) {
       const s = JSON.parse(row.secrets); // never expose tokens — only the account config
@@ -68,8 +76,8 @@ export async function POST(req: Request) {
 
   if (body.select && key === 'meta_ads') {
     const patch: any = {};
-    for (const f of ['ad_account_id', 'page_id', 'default_image_url', 'default_link'] as const) {
-      if (body.select[f] !== undefined) patch[f] = String(body.select[f]);
+    for (const f of ['ad_account_id', 'page_id', 'default_image_url', 'default_link', 'objective', 'meta_app_id', 'app_store_url'] as const) {
+      if (body.select[f] !== undefined) patch[f] = String(body.select[f]).trim();
     }
     updateConnectorSecrets(projectId, 'meta_ads', patch);
     return NextResponse.json({ ok: true });

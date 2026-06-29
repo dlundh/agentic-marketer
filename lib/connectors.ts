@@ -317,23 +317,30 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
       if (!s?.access_token) {
         return { status: 'ready', detail: `Ad campaign prepared. Connect ${def.label} under ⚙ Channels (finish that platform's API approval, then pick your ad account) to launch it for real.` };
       }
-      // Google: if the objective wasn't set explicitly, infer it from the product —
-      // an app-store URL ⇒ App campaign (installs); otherwise a Search campaign.
-      if (action.channel === 'google_ads' && !s.objective) {
-        const det = parseAppStoreUrl(getProject(action.project_id)?.url || '');
-        if (det) s = { ...s, objective: 'app', app_id: s.app_id || det.appId, app_store: s.app_store || det.store };
+      // Auto-detect app-vs-website from the product when no objective is set —
+      // an app-store URL ⇒ App campaign (installs). For Meta we also default the
+      // store URL; the Meta App ID still has to be provided (can't be detected).
+      const projUrl = getProject(action.project_id)?.url || '';
+      if ((action.channel === 'google_ads' || action.channel === 'meta_ads') && !s.objective) {
+        const det = parseAppStoreUrl(projUrl);
+        if (det && action.channel === 'google_ads') s = { ...s, objective: 'app', app_id: s.app_id || det.appId, app_store: s.app_store || det.store };
+        if (det && action.channel === 'meta_ads') s = { ...s, objective: 'app', app_store_url: s.app_store_url || projUrl };
       }
       const m = safeJSON(action.meta) || {};
-      const link = m.link || s.default_link || getProject(action.project_id)?.url || '';
-      // Google App campaigns drive installs from the store listing — no website link needed.
       const isGoogleApp = action.channel === 'google_ads' && s.objective === 'app';
+      const isMetaApp = action.channel === 'meta_ads' && s.objective === 'app';
+      // App campaigns drive installs from the store listing; website ads need a link.
+      const link = isMetaApp ? (s.app_store_url || projUrl) : (m.link || s.default_link || projUrl || '');
       if (!link && !isGoogleApp) return { status: 'ready', detail: 'Ad is ready but has no destination URL — add a link before launching.' };
       if (isGoogleApp && !s.app_id) {
         return { status: 'ready', detail: 'This is set to an App campaign but no app store ID is set — add it under ⚙ Channels → Google Ads (App installs), then approve.' };
       }
-      // App Store URLs are a Meta-objective limitation specifically.
-      if (action.channel === 'meta_ads' && /\b(apps\.apple\.com|itunes\.apple\.com|play\.google\.com)\b/i.test(link)) {
-        return { status: 'ready', detail: 'This ad points to an App Store URL — Meta only allows those with the App Installs objective. Set a website "Default ad destination URL" under ⚙ Channels → Meta Ads (e.g. your landing page), then approve.' };
+      if (isMetaApp && !s.meta_app_id) {
+        return { status: 'ready', detail: 'This is set to a Meta App-install campaign but no Meta App ID is set — register your app in Meta, then add its App ID under ⚙ Channels → Meta Ads (App installs).' };
+      }
+      // Only block App Store URLs for Meta WEBSITE ads (where they're not allowed).
+      if (action.channel === 'meta_ads' && !isMetaApp && /\b(apps\.apple\.com|itunes\.apple\.com|play\.google\.com)\b/i.test(link)) {
+        return { status: 'ready', detail: 'This ad points to an App Store URL but Meta is set to website traffic — Meta only allows store links with the App-install objective. Either switch Meta Ads to “App installs” under ⚙ Channels, or set a website “Default ad destination URL”.' };
       }
       const spec: AdSpec = {
         name: action.title.slice(0, 80), objective: m.objective,

@@ -18,7 +18,7 @@ type EmailList = { id: string; name: string; total?: number; active?: number };
 type Directive = { id: string; text: string; created_at: number };
 type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[]; lists?: EmailList[]; directives?: Directive[] };
 type Auth = { connected: boolean; method: string; detail: string };
-type MetaSel = { accounts: { id: string; name: string }[]; pages: { id: string; name: string }[]; ad_account_id: string; page_id: string; default_image_url: string; default_link: string; handle: string };
+type MetaSel = { accounts: { id: string; name: string }[]; pages: { id: string; name: string }[]; ad_account_id: string; page_id: string; default_image_url: string; default_link: string; handle: string; objective?: string; meta_app_id?: string; app_store_url?: string; detected_app?: boolean };
 type GoogleSel = { customer_id: string; login_customer_id: string; default_link: string; objective?: string; app_id?: string; app_store?: string; detected_app?: boolean };
 type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean; excluded?: boolean; meta?: MetaSel; gads?: GoogleSel };
 
@@ -1381,12 +1381,23 @@ function ChannelsModal({ projectId, onClose, hasCampaign, hasProject, onCreate }
 function MetaConfig({ meta, onSelect }: { meta: MetaSel; onSelect: (sel: any) => void }) {
   const [img, setImg] = useState(meta.default_image_url || '');
   const [link, setLink] = useState(meta.default_link || '');
+  const [objective, setObjective] = useState(meta.objective || 'traffic');
+  const [metaApp, setMetaApp] = useState(meta.meta_app_id || '');
+  const [storeUrl, setStoreUrl] = useState(meta.app_store_url || '');
+  const isApp = objective === 'app';
   return (
     <div className="meta-cfg">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div className="note" style={{ fontSize: 11.5, fontWeight: 600 }}>Ad spend settings</div>
         <button className="mini" title="Re-fetch ad accounts & Pages from Meta (after creating a new one)" onClick={() => onSelect({ __refresh: true })}>↻ Refresh</button>
       </div>
+      <label className="meta-field"><span>What to promote</span>
+        <select className="list-select" value={objective} onChange={(e) => { setObjective(e.target.value); onSelect({ objective: e.target.value }); }}>
+          <option value="traffic">Website traffic</option>
+          <option value="app">Mobile app installs (App Promotion)</option>
+        </select>
+      </label>
+      {meta.detected_app && isApp && <div className="note" style={{ fontSize: 11 }}>Auto-detected an app store link for this product → defaulted to App Promotion.</div>}
       <label className="meta-field"><span>Ad account</span>
         <select className="list-select" value={meta.ad_account_id} onChange={(e) => onSelect({ ad_account_id: e.target.value })}>
           {!meta.accounts.length && <option value="">(no ad accounts found)</option>}
@@ -1399,15 +1410,32 @@ function MetaConfig({ meta, onSelect }: { meta: MetaSel; onSelect: (sel: any) =>
           {meta.pages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </label>
-      <label className="meta-field"><span>Default destination URL</span>
-        <input className="field" style={{ marginTop: 0 }} placeholder="https://your-website.com  (a WEBSITE, not an App Store link)" value={link} onChange={(e) => setLink(e.target.value)} />
-        <button className="mini" onClick={() => onSelect({ default_link: link.trim() })}>Save</button>
-      </label>
+      {isApp ? (
+        <>
+          <label className="meta-field"><span>Meta App ID</span>
+            <input className="field" style={{ marginTop: 0 }} placeholder="your app's Meta App ID (from Meta App Dashboard)" value={metaApp} onChange={(e) => setMetaApp(e.target.value)} />
+            <button className="mini" onClick={() => onSelect({ meta_app_id: metaApp.trim() })}>Save</button>
+          </label>
+          <label className="meta-field"><span>App store URL</span>
+            <input className="field" style={{ marginTop: 0 }} placeholder="https://apps.apple.com/…/idXXXXXXXX" value={storeUrl} onChange={(e) => setStoreUrl(e.target.value)} />
+            <button className="mini" onClick={() => onSelect({ app_store_url: storeUrl.trim() })}>Save</button>
+          </label>
+        </>
+      ) : (
+        <label className="meta-field"><span>Default destination URL</span>
+          <input className="field" style={{ marginTop: 0 }} placeholder="https://your-website.com  (a WEBSITE, not an App Store link)" value={link} onChange={(e) => setLink(e.target.value)} />
+          <button className="mini" onClick={() => onSelect({ default_link: link.trim() })}>Save</button>
+        </label>
+      )}
       <label className="meta-field"><span>Default ad image URL</span>
         <input className="field" style={{ marginTop: 0 }} placeholder="https://…/app-icon.png  (used when an ad has no image)" value={img} onChange={(e) => setImg(e.target.value)} />
         <button className="mini" onClick={() => onSelect({ default_image_url: img.trim() })}>Save</button>
       </label>
-      <div className="note" style={{ fontSize: 11 }}>Ads link to the destination URL (use a website landing page — App Store links require Meta's App Installs objective). Every ad needs an image; agents find one, this is the fallback.</div>
+      <div className="note" style={{ fontSize: 11 }}>
+        {isApp
+          ? 'App Promotion drives installs to your store listing. Needs your app registered in Meta (App ID) + the store URL; iOS needs SKAdNetwork set up to attribute installs. Every ad still needs an image (set 🖼 Ad images or a fallback here).'
+          : 'Website ads link to the destination URL (App Store links require the App-install objective above). Every ad needs an image; the agent finds one, this is the fallback.'}
+      </div>
     </div>
   );
 }

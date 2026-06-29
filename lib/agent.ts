@@ -413,7 +413,7 @@ function adPerformanceDigest(campaignId: string): string {
   return rows.length ? rows.slice(-30).join('\n') : '';
 }
 
-function executionPrompt(p: Project, role: string, budgetLine: string, channelLabels: string, findings: string, messaging = '', usedAngles: string[] = [], googleObjective: string | null = null, adImages: string[] = []): string {
+function executionPrompt(p: Project, role: string, budgetLine: string, channelLabels: string, findings: string, messaging = '', usedAngles: string[] = [], googleObjective: string | null = null, adImages: string[] = [], metaObjective: string | null = null): string {
   const head = tacticsPolicy(p, budgetLine);
   const scopeLine = channelLabels
     ? `CONNECTED CHANNELS — you may ONLY propose actions for these (every action must be auto-publishable): ${channelLabels}. Never propose for any channel not in this list.`
@@ -460,7 +460,10 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
         ? `AD IMAGES (the user provided these — use ONE of these EXACT URLs as \`image_url\`, picking the best fit for the ad's angle; only fall back to finding your own if none fit):\n${adImages.map((u) => `  - ${u}`).join('\n')}`
         : `No user-provided ad images — for image ads, use WebFetch on the product page to find a real public image URL (app icon, screenshot, OG image).`,
       `Per platform:`,
-      `  • meta_ads / reddit_ads: a WEBSITE landing-page \`link\` (NOT an App Store URL — Meta only allows those with its App Installs objective), a short \`headline\`, AND an \`image_url\` (a PUBLIC image). These FAIL to launch without an image.`,
+      metaObjective === 'app'
+        ? `  • meta_ads — this product is a MOBILE APP, so propose APP INSTALL ads (Meta App Promotion): install-focused primary text in \`content\`, a short \`headline\`, and an \`image_url\`. The destination is the app's store listing (handled automatically) — do NOT add a website \`link\`. Title it as an app-install ad.`
+        : `  • meta_ads: a WEBSITE landing-page \`link\` (NOT an App Store URL — that needs the App-install objective), a short \`headline\`, AND an \`image_url\` (a PUBLIC image). FAILS to launch without an image.`,
+      `  • reddit_ads: a destination \`link\`, a short \`headline\`, AND an \`image_url\` (a PUBLIC image). FAILS without an image.`,
       googleObjective === 'app'
         ? `  • google_ads — this product is a MOBILE APP, so propose APP INSTALL ads (a Google App campaign), NOT search ads: provide \`headlines\` (3–5 distinct, ≤30 chars), \`descriptions\` (2–4 distinct, ≤90 chars), and an \`image_url\` from the ad images above if one fits (App campaigns use image assets). The destination is the app's store listing — do NOT design keyword/search targeting, negative keywords, or a website \`link\`. Title it as an app-install ad (e.g. "Google App — …"), not "Google Search".`
         : `  • google_ads (responsive search ads): a WEBSITE \`link\` (final URL), plus \`headlines\` (3–15 distinct, ≤30 chars) and \`descriptions\` (2–4 distinct, ≤90 chars). No image needed.`,
@@ -528,15 +531,21 @@ export async function runAgent(args: RunArgs): Promise<RunOutcome> {
     // Tell the ads agent which Google ad type fits the product: an app-store
     // URL (or a saved 'app' objective) ⇒ App-install ads, else Search ads.
     let googleObjective: string | null = null;
-    if (job.kind === 'ads' && connected.includes('google_ads')) {
-      const g = getConnector(project.id, 'google_ads');
-      const gs = g?.connected && g.secrets ? JSON.parse(g.secrets) : null;
-      googleObjective = gs?.objective || (parseAppStoreUrl(project.url || '') ? 'app' : 'search');
+    let metaObjective: string | null = null;
+    if (job.kind === 'ads') {
+      const objOf = (key: string, appVal: string, webVal: string) => {
+        if (!connected.includes(key)) return null;
+        const c = getConnector(project.id, key);
+        const cs = c?.connected && c.secrets ? JSON.parse(c.secrets) : null;
+        return cs?.objective || (parseAppStoreUrl(project.url || '') ? appVal : webVal);
+      };
+      googleObjective = objOf('google_ads', 'app', 'search');
+      metaObjective = objOf('meta_ads', 'app', 'traffic');
     }
     const adImages = job.kind === 'ads' ? adImageUrls(project.id) : [];
     prompt = args.resumeSessionId
       ? `Continue your role from where you left off; propose only for connected channels (${labels || 'none — stop'}). Do NOT repeat the angle/hook/opener of anything already posted; every action must be materially different. Then stop.`
-      : executionPrompt(project, job.kind, budgetLine, labels, findings, messaging, usedAngles, googleObjective, adImages);
+      : executionPrompt(project, job.kind, budgetLine, labels, findings, messaging, usedAngles, googleObjective, adImages, metaObjective);
   } else if (job.kind === 'research') {
     mcpTools = RESEARCH_TOOLS;
     prompt = args.resumeSessionId

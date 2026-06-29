@@ -130,7 +130,12 @@ so the budget caps, autonomy modes, spend-sync, optimizer, and per-ad controls
 work identically across all of them. Connect an ad account and approved (or
 auto-approved) ad actions launch real, initially-paused campaigns, then activate:
 
-- **Meta Ads** — Marketing API (Facebook/Instagram). Single headline + creative image.
+- **Meta Ads** — Marketing API (Facebook/Instagram). Like Google, picks the type
+  from what you're marketing: a **website-traffic** ad, or an **App Promotion**
+  campaign (installs) for a mobile app. App vs website is auto-detected from an App
+  Store / Play URL and overridable under ⚙ Channels → Meta Ads. App Promotion needs
+  your app registered in Meta (a **Meta App ID**) + the store URL, and SKAdNetwork
+  for iOS install attribution.
 - **Google Ads** — picks the campaign type from what you're marketing: a **Search
   campaign** (responsive search ad → website) for a site/SaaS, or an **App
   campaign** (installs from the store listing) for a mobile app. App vs website is
