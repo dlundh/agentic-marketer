@@ -1372,9 +1372,11 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
         <span className="cn">{c.label}{c.paid ? ' 💲' : ''}</span>
         <span className="cx">{statusText}</span>
         <div className="chan-btns">
-          <button className="mini" disabled={!hasProject || !hasCampaign || creating} title={!hasProject ? 'Open a project first' : !hasCampaign ? 'Launch a campaign first' : 'Agent prepares a name-matched account'} onClick={create}>
-            {creating ? <span className="spin">⟳</span> : '✨'} Create
-          </button>
+          {['organic', 'community'].includes(c.category) && !c.paid && (
+            <button className="mini" disabled={!hasProject || !hasCampaign || creating} title={!hasProject ? 'Open a project first' : !hasCampaign ? 'Launch a campaign first' : 'Agent prepares a name-matched brand account to sign up for'} onClick={create}>
+              {creating ? <span className="spin">⟳</span> : '✨'} Create
+            </button>
+          )}
           {c.connected
             ? <button className="mini danger" onClick={() => onDisconnect(c.key)}>Disconnect</button>
             : <button className="mini" onClick={() => { setOpen(!open); setMsg(null); }}>{open ? 'Cancel' : 'Connect'}</button>}

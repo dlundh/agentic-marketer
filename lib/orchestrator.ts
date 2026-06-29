@@ -280,6 +280,12 @@ export function generateActions(projectId: string): { ok: boolean; error?: strin
 export function createAccountKit(projectId: string, channel: string): { ok: boolean; error?: string } {
   const campaign = getCampaignByProject(projectId);
   if (!campaign) return { ok: false, error: 'Launch a campaign first — account-setup tasks appear in your action queue.' };
+  // Account-kit only makes sense for handle-based social accounts you sign up for.
+  // Paid ad platforms (Google/Meta/Reddit Ads) and email/webhook connect via OAuth/keys.
+  const def = channelDef(channel);
+  if (def.paid || !['organic', 'community'].includes(def.category)) {
+    return { ok: false, error: `${def.label} isn’t a sign-up account — connect it under ⚙ Channels (it uses OAuth/API keys, not a brand handle).` };
+  }
   const abort = new AbortController();
   (async () => {
     try { await runAccountKit({ projectId, channel, abort }); } catch { /* surfaced as no new action */ }
