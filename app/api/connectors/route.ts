@@ -22,6 +22,10 @@ export async function GET(req: Request) {
       const s = JSON.parse(row.secrets);
       base.meta = { accounts: s.accounts || [], pages: s.pages || [], ad_account_id: s.ad_account_id || '', page_id: s.page_id || '', default_image_url: s.default_image_url || '', default_link: s.default_link || '', handle: s.handle || '' };
     }
+    if (ch.key === 'google_ads' && row?.connected && row.secrets) {
+      const s = JSON.parse(row.secrets); // never expose tokens — only the account config
+      base.gads = { customer_id: s.customer_id || '', login_customer_id: s.login_customer_id || '', default_link: s.default_link || '' };
+    }
     return base;
   });
   return NextResponse.json({ connectors });
@@ -60,6 +64,15 @@ export async function POST(req: Request) {
       if (body.select[f] !== undefined) patch[f] = String(body.select[f]);
     }
     updateConnectorSecrets(projectId, 'meta_ads', patch);
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.select && key === 'google_ads') {
+    const patch: any = {};
+    for (const f of ['customer_id', 'login_customer_id', 'default_link'] as const) {
+      if (body.select[f] !== undefined) patch[f] = String(body.select[f]).trim();
+    }
+    updateConnectorSecrets(projectId, 'google_ads', patch);
     return NextResponse.json({ ok: true });
   }
 

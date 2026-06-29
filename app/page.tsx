@@ -19,7 +19,8 @@ type Directive = { id: string; text: string; created_at: number };
 type Detail = { project: Project; jobs: Job[]; findings: Finding[]; files: FileRow[]; campaign: Campaign | null; actions: ActionItem[]; lists?: EmailList[]; directives?: Directive[] };
 type Auth = { connected: boolean; method: string; detail: string };
 type MetaSel = { accounts: { id: string; name: string }[]; pages: { id: string; name: string }[]; ad_account_id: string; page_id: string; default_image_url: string; default_link: string; handle: string };
-type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean; excluded?: boolean; meta?: MetaSel };
+type GoogleSel = { customer_id: string; login_customer_id: string; default_link: string };
+type Channel = { key: string; label: string; category: string; executor: string; paid: boolean; note?: string; connected: boolean; excluded?: boolean; meta?: MetaSel; gads?: GoogleSel };
 
 // ----------------------------- helpers --------------------------------------
 const fmtBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -1189,6 +1190,10 @@ function ChannelsModal({ projectId, onClose, hasCampaign, hasProject, onCreate }
     await post(sel && sel.__refresh ? { key: 'meta_ads', refresh: true } : { key: 'meta_ads', select: sel });
     await load();
   };
+  const selectGoogle = async (sel: any) => {
+    await post({ key: 'google_ads', select: sel });
+    await load();
+  };
 
   const [hookBusy, setHookBusy] = useState(false); const [hookMsg, setHookMsg] = useState<string | null>(null);
   const [smtpBusy, setSmtpBusy] = useState(false); const [smtpMsg, setSmtpMsg] = useState<string | null>(null);
@@ -1263,7 +1268,7 @@ function ChannelsModal({ projectId, onClose, hasCampaign, hasProject, onCreate }
                 <ChannelRow
                   key={c.key} c={c} webhookOn={!!webhookOn} smtpOn={!!smtpOn}
                   hasCampaign={hasCampaign} hasProject={hasProject}
-                  onConnect={connect} onDisconnect={disconnect} onCreate={onCreate} onExclude={setExclude} onMetaSelect={selectMeta} projectId={projectId}
+                  onConnect={connect} onDisconnect={disconnect} onCreate={onCreate} onExclude={setExclude} onMetaSelect={selectMeta} onGoogleSelect={selectGoogle} projectId={projectId}
                 />
               ))}
             </div>
@@ -1309,11 +1314,35 @@ function MetaConfig({ meta, onSelect }: { meta: MetaSel; onSelect: (sel: any) =>
   );
 }
 
-function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, onDisconnect, onCreate, onExclude, onMetaSelect, projectId }: {
+function GoogleConfig({ gads, onSelect }: { gads: GoogleSel; onSelect: (sel: any) => void }) {
+  const [customer, setCustomer] = useState(gads.customer_id || '');
+  const [manager, setManager] = useState(gads.login_customer_id || '');
+  const [link, setLink] = useState(gads.default_link || '');
+  return (
+    <div className="meta-cfg">
+      <div className="note" style={{ fontSize: 11.5, fontWeight: 600 }}>Ad spend settings</div>
+      <label className="meta-field"><span>Customer ID</span>
+        <input className="field" style={{ marginTop: 0 }} placeholder="123-456-7890 (the ad account that runs ads)" value={customer} onChange={(e) => setCustomer(e.target.value)} />
+        <button className="mini" onClick={() => onSelect({ customer_id: customer })}>Save</button>
+      </label>
+      <label className="meta-field"><span>Manager (MCC)</span>
+        <input className="field" style={{ marginTop: 0 }} placeholder="optional — manager account id" value={manager} onChange={(e) => setManager(e.target.value)} />
+        <button className="mini" onClick={() => onSelect({ login_customer_id: manager })}>Save</button>
+      </label>
+      <label className="meta-field"><span>Default destination URL</span>
+        <input className="field" style={{ marginTop: 0 }} placeholder="https://your-landing-page.com" value={link} onChange={(e) => setLink(e.target.value)} />
+        <button className="mini" onClick={() => onSelect({ default_link: link.trim() })}>Save</button>
+      </label>
+      <div className="note" style={{ fontSize: 11 }}>Each approved ad creates its own Google campaign → ad group → responsive search ad under this customer account (no campaign to pick). Search ads use headlines/descriptions — no image needed. The destination URL is the fallback landing page when an ad doesn’t specify one.</div>
+    </div>
+  );
+}
+
+function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, onDisconnect, onCreate, onExclude, onMetaSelect, onGoogleSelect, projectId }: {
   c: Channel; webhookOn: boolean; smtpOn: boolean; hasCampaign: boolean; hasProject: boolean;
   onConnect: (key: string, secrets: any) => Promise<{ connected: boolean; message: string }>;
   onDisconnect: (key: string) => void; onCreate: (channel: string) => Promise<string | null>;
-  onExclude: (key: string, exclude: boolean) => void; onMetaSelect?: (sel: any) => void; projectId: string;
+  onExclude: (key: string, exclude: boolean) => void; onMetaSelect?: (sel: any) => void; onGoogleSelect?: (sel: any) => void; projectId: string;
 }) {
   // In-progress connect details persist to sessionStorage (per project+channel),
   // so closing the popup, reloading, or the OAuth round-trip doesn't wipe what
@@ -1403,6 +1432,7 @@ function ChannelRow({ c, webhookOn, smtpOn, hasCampaign, hasProject, onConnect, 
         </label>
       )}
       {c.key === 'meta_ads' && c.connected && c.meta && onMetaSelect && <MetaConfig meta={c.meta} onSelect={onMetaSelect} />}
+      {c.key === 'google_ads' && c.connected && c.gads && onGoogleSelect && <GoogleConfig gads={c.gads} onSelect={onGoogleSelect} />}
       {createMsg && <div className="chan-msg">{createMsg}</div>}
       {open && !c.connected && (isOAuth && !webhookMode ? (
         <div className="chan-form">
