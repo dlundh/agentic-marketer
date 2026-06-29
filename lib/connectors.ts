@@ -59,6 +59,21 @@ export const CHANNELS: ChannelDef[] = [
 export const channelDef = (key: string): ChannelDef =>
   CHANNELS.find((c) => c.key === key) || { key, label: key, category: 'content', executor: 'manual' };
 
+// Strip "AI slop" — scaffolding labels the model sometimes bakes into the body
+// copy (e.g. "Primary text:", "Headline:", "CTA:", "Final URL:") — so we never
+// publish them. Unwraps a mislabeled body (keeps the text after the label) and,
+// for ads, drops pure structural-metadata lines that belong in their own fields.
+const BODY_LABEL = /^\s*(?:[-*•]\s*)?(primary text|body copy|body|caption|ad copy|copy|post|tweet|thread|message|hook|headline|sub-?headline)\s*:\s+/i;
+const META_LINE = /^\s*(?:[-*•>]\s*)?(final url|destination url|display path|landing page|cta|call[- ]to[- ]action|headlines?|descriptions?|sitelinks?|primary text|character count|char(?:acter)? limit|image|format|notes?)\s*[:(]/i;
+export function cleanCopy(text?: string | null, isAd = false): string {
+  if (!text) return '';
+  let lines = String(text).split('\n');
+  // Unwrap a mislabeled body: first line always, every line for ads.
+  lines = lines.map((l, i) => (i === 0 || isAd ? l.replace(BODY_LABEL, '') : l));
+  if (isAd) lines = lines.filter((l) => !META_LINE.test(l)); // drop structural notes
+  return lines.join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function seedConnectors(projectId: string) {
   for (const ch of CHANNELS) {
     if (!getConnector(projectId, ch.key)) {
@@ -246,7 +261,7 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
 
   try {
     // Native API adapters: post directly via the platform (no webhook needed).
-    const text = (action.content || action.summary || action.title || '').trim();
+    const text = cleanCopy(action.content || action.summary || action.title, action.kind === 'ad');
 
     // Community-listening reply: post `content` as a reply/comment on a specific
     // existing post (found by the engagement agent), via the channel's API.
@@ -323,7 +338,7 @@ export async function runAction(action: ActionRow): Promise<{ status: 'done' | '
       const spec: AdSpec = {
         name: action.title.slice(0, 80), objective: m.objective,
         dailyBudgetCents: action.cost_cents || 500,
-        message: action.content || action.summary || '', headline: m.headline || action.title.slice(0, 40),
+        message: cleanCopy(action.content || action.summary, true), headline: m.headline || action.title.slice(0, 40),
         description: m.description || '', link,
         // Prefer the action's image, then the user's ad-image pool, then the Meta default.
         imageUrl: m.image_url || m.picture || adImageUrls(action.project_id)[0] || s.default_image_url, cta: m.cta || 'LEARN_MORE',

@@ -9,7 +9,7 @@ import {
 } from './db';
 import { emitEvent } from './events';
 import { renderPdf, type PdfSection } from './pdf';
-import { channelDef, CHANNELS, autoChannels } from './connectors';
+import { channelDef, CHANNELS, autoChannels, cleanCopy } from './connectors';
 import { listActions, getConnector, adImageUrls } from './db';
 import { parseAppStoreUrl } from './google';
 
@@ -168,7 +168,7 @@ function buildTools(job: Job, outcome: RunOutcome) {
       kind: z.enum(['post', 'thread', 'ad', 'email', 'outreach', 'experiment', 'asset', 'seo', 'video', 'reply']).describe('Type of action ("reply" = a comment/reply on a specific existing post found via listening)'),
       title: z.string().describe('Short label for the queue'),
       summary: z.string().describe('One line: what this does and why'),
-      content: z.string().describe('The actual ready-to-publish copy / script / ad text'),
+      content: z.string().describe('The EXACT text to publish, verbatim — nothing else. NO scaffolding labels ("Primary text:", "Headline:", "Body:", "Caption:", "CTA:", "Final URL:", "Display path:"), NO field names, NO notes/instructions, NO markdown headings. Headline/headlines/descriptions/link go in their OWN fields, not here. Write it exactly as it should appear in the post/ad.'),
       angle: z.string().describe('A short label (3–6 words) for the messaging angle/hook/theme of THIS action, e.g. "founder origin story", "contrarian take on busywork", "time-saved ROI stat", "customer win story". MUST be distinct from the angles already used (listed in your context). Used to keep the account from looking repetitive/spammy.'),
       cost_usd: z.number().default(0).describe('Estimated spend in USD if executed (0 for organic)'),
       recipients: z.array(z.string()).optional().describe('Email recipients (only if the user already provided them; never invent addresses)'),
@@ -193,7 +193,7 @@ function buildTools(job: Job, outcome: RunOutcome) {
       const a = createAction({
         project_id: projectId, campaign_id: c.id, job_id: job.id,
         channel: args.channel, kind: args.kind, title: args.title, summary: args.summary,
-        content: args.content, cost_cents: cost,
+        content: cleanCopy(args.content, args.kind === 'ad'), cost_cents: cost,
         meta: { recipients: args.recipients, subject: args.subject, targeting: args.targeting,
                 schedule: args.schedule, rationale: args.rationale, overBudget, angle: args.angle,
                 image_url: args.image_url, headline: args.headline, headlines: args.headlines,
@@ -363,6 +363,7 @@ function tacticsPolicy(p: Project, budgetLine: string): string {
     `• MAXIMIZE TRACTION PER DOLLAR with ingenious, high-leverage tactics tailored to THIS product's ideal customer.`,
     `• VARIETY / ANTI-REPETITION (critical — repeated messaging makes accounts look like spam and gets them throttled or banned): study the "MESSAGING ALREADY PUBLISHED/QUEUED" list in your context and make EVERY new action genuinely fresh. Rotate the angle, hook, opening line, content structure (e.g. story vs. stat vs. question vs. how-to vs. hot take), length, and CTA. Never reuse a previous opener or template, never re-state the same value prop the same way. Set a distinct \`angle\` on each propose_action that is NOT in the already-used list. If you can't find a genuinely new angle for a channel, propose fewer actions rather than near-duplicates.`,
     `• ETHICS (hard limits): no spam, no fake accounts/followers/engagement, no fake reviews, no astroturfing, no bots that break platform ToS, no deceptive or misleading claims, no purchased email lists. Everything must be genuine and respect the audience. If a tactic would annoy people or risk an account ban, DO NOT propose it. Email must be opt-in friendly with a clear opt-out (CAN-SPAM/GDPR).`,
+    `• NO SCAFFOLDING / NO AI SLOP: \`content\` is published verbatim, so it must contain ONLY the real copy — never field labels or notes like "Primary text:", "Headline:", "Body:", "Caption:", "CTA:", "Final URL:", "Display path:", "Option 1", or markdown headings. Those structured pieces go in their own fields (headline, headlines, descriptions, link). If you wouldn't type it into the post box yourself, it doesn't belong in \`content\`.`,
     `• CHANNEL-NATIVE & READY-TO-POST: each action's \`content\` must be EXACTLY what should appear on that channel, posted as-is. This is critical:`,
     `   – X / Twitter / Mastodon / Threads: write a real tweet, or a real tweet-thread where each idea is a natural tweet. Conversational and human. NO stage directions, NO production notes (no "Format:", "On-screen text:", "VO:", "B-roll", "HOOK (0–3s)"), and NO manual "(1/6)" numbering — threads are split automatically.`,
     `   – Reddit: a genuine post (clear title + body) that respects the subreddit's norms; not an ad.`,
@@ -656,7 +657,7 @@ export async function runRevision(opts: { action: ActionRow; feedback: string; a
       // A scheduled post keeps its slot (stays 'scheduled'); others return to the queue.
       const restoreScheduled = cur.scheduled_at > 0;
       updateAction(action.id, {
-        title: a.title, summary: a.summary, content: a.content, cost_cents: cost,
+        title: a.title, summary: a.summary, content: cleanCopy(a.content, action.kind === 'ad'), cost_cents: cost,
         meta: JSON.stringify(meta), status: restoreScheduled ? 'scheduled' : 'proposed', result: null,
       });
       updated = true;
