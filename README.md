@@ -134,14 +134,21 @@ Shared behavior:
   limits enforced by a background poller that syncs real spend from each platform.
 - **Autonomy modes**: approve every ad · approve the first then auto · fully
   autonomous · auto-optimize only.
-- **Closed-loop optimization** — the optimizer pulls per-ad CTR/clicks/CPC/spend on
-  a schedule and: (1) **auto-pauses** ads that burn money with no traction (dead
-  spend, or sub-floor CTR after a fair test); (2) **feeds real results back** into
-  the ads agent — winning angles/hooks are reused and pushed further, losing ones
-  dropped, and each new ad is a deliberate improvement; (3) in fully-autonomous
-  mode, **self-heals** by generating performance-informed replacements when the
-  live-ad count drops, so the campaign keeps iterating toward better CTR/CPC. Hit
-  **⚡ Optimize** anytime to run the same review on demand.
+- **Closed-loop optimization** — the optimizer pulls per-ad **installs/conversions
+  (+ CPA), CTR, CPC, clicks, spend** on a schedule and learns from them. The true
+  success metric is **installs/conversions**, not clicks:
+  - **Winners are protected** — an ad that's converting is never auto-paused; the
+    agent keeps it running and only proposes *new variants* that build on its
+    winning angle.
+  - **Losers** (spend with no installs — dead, or sub-floor CTR after a fair test)
+    are dealt with per autonomy mode (below).
+  - Real results are **fed back into the ads agent**, so each new ad is a
+    deliberate improvement (reuse what converts, drop what doesn't).
+  - **By autonomy mode:** in **Fully autonomous** it auto-pauses losers and
+    self-heals by launching performance-informed replacements; in **Approve-first
+    / manual** it does *not* touch your ads — it tracks performance and surfaces a
+    **"recommend pausing"** flag (one-click Pause) plus improvement proposals when
+    you hit **⚡ Optimize**. Manually-started ads are optimized the same way.
 - **Per-ad controls**: pause, resume, or remove any live ad. Removing deletes the
   underlying platform campaign; the kill switch pauses everything at once.
 - Spend is always on **your** ad account with **your** billing — the app never

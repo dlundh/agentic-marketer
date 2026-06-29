@@ -403,8 +403,11 @@ function adPerformanceDigest(campaignId: string): string {
     if (!p) continue;
     const ctr = p.impressions ? `${(((p.clicks || 0) / p.impressions) * 100).toFixed(2)}% CTR` : 'no impressions yet';
     const cpc = p.clicks ? `$${(((p.spend_cents || 0) / 100) / p.clicks).toFixed(2)} CPC` : 'no clicks';
-    const state = m.ad_paused ? `PAUSED${m.paused_reason ? ` — ${m.paused_reason}` : ''}` : 'LIVE';
-    rows.push(`- [${a.channel}] ${m.angle ? `angle "${m.angle}": ` : ''}${state} · ${ctr} · ${cpc} · $${((p.spend_cents || 0) / 100).toFixed(2)} spent / ${p.clicks || 0} clicks / ${p.impressions || 0} impressions`);
+    const inst = p.conversions != null
+      ? `${p.conversions} installs/conv${p.cpa_cents ? ` @ $${(p.cpa_cents / 100).toFixed(2)} CPA` : ''}`
+      : 'installs n/a';
+    const state = m.ad_paused ? `PAUSED${m.paused_reason ? ` — ${m.paused_reason}` : ''}` : (p.conversions >= 1 ? 'LIVE ✓ converting' : 'LIVE');
+    rows.push(`- [${a.channel}] ${m.angle ? `angle "${m.angle}": ` : ''}${state} · ${inst} · ${ctr} · ${cpc} · $${((p.spend_cents || 0) / 100).toFixed(2)} spent / ${p.clicks || 0} clicks`);
   }
   return rows.length ? rows.slice(-30).join('\n') : '';
 }
@@ -425,7 +428,7 @@ function executionPrompt(p: Project, role: string, budgetLine: string, channelLa
   const camp = role === 'ads' || role === 'optimizer' ? getCampaignByProject(p.id) : null;
   const perf = camp ? adPerformanceDigest(camp.id) : '';
   const perfBlock = perf
-    ? `\nAD PERFORMANCE SO FAR — iterate toward the best campaign, don't start from scratch:\n• KEEP/SCALE the angles & hooks with the highest CTR and lowest CPC — propose fresh variants that push those further.\n• STOP using angles that were paused or have low CTR — don't re-propose them.\n• For each PAUSED ad, propose ONE materially better replacement (sharper hook, tighter audience, clearer value) — explain in the rationale what you changed and why it should beat it.\n${perf}\n`
+    ? `\nAD PERFORMANCE SO FAR — iterate toward the best campaign, don't start from scratch. The TRUE success metric is INSTALLS / CONVERSIONS (and CPA), not clicks:\n• A "LIVE ✓ converting" ad is WINNING — do NOT propose to replace it. Leave it running; at most propose a NEW variant that builds on its winning angle to find more volume.\n• KEEP/SCALE the angles & hooks driving installs at the best CPA (then highest CTR / lowest CPC).\n• STOP using angles that were paused or spent with no installs — don't re-propose them.\n• For each PAUSED ad, propose ONE materially better replacement (sharper hook, tighter audience, clearer value) — explain in the rationale what you changed and why it should convert better.\n${perf}\n`
     : '';
   const ctx = `${directionBlock(p.id)}\nRESEARCH & PLAN CONTEXT:\n${findings}\n${p.summary ? `\nOverall strategy: ${p.summary}` : ''}${compLine}${perfBlock}\n\n${scopeLine}${dupeLine}\n`;
   const jobByRole: Record<string, string> = {

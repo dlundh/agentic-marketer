@@ -922,7 +922,14 @@ function ActionCard({ a, onDecide, onRevise, onOpenChannels, lists = [], onOpenL
       )}
       {a.kind === 'ad' && a.status === 'done' && meta.perf && !meta.ad_paused && (
         <div className="note" style={{ fontSize: 11 }}>
+          {meta.perf.conversions >= 1 && <b style={{ color: 'var(--green)' }}>✓ {meta.perf.conversions} install{meta.perf.conversions === 1 ? '' : 's'}{meta.perf.cpa_cents ? ` @ ${usd(meta.perf.cpa_cents)} CPA` : ''} · </b>}
           {usd(meta.perf.spend_cents)} spent · {Number(meta.perf.impressions || 0).toLocaleString()} impressions · {Number(meta.perf.clicks || 0).toLocaleString()} clicks · CTR {((meta.perf.ctr || 0) * 100).toFixed(2)}%
+        </div>
+      )}
+      {a.kind === 'ad' && a.status === 'done' && !meta.ad_paused && meta.recommend_pause && onAdControl && (
+        <div className="note" style={{ fontSize: 11.5, color: 'var(--amber, #b8860b)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          💡 {meta.recommend_pause}
+          <button className="mini" onClick={() => onAdControl(a.id, 'pause_ad')}>Pause</button>
         </div>
       )}
 

@@ -195,17 +195,18 @@ export async function removeGoogleAd(s: any, ids: AdIds) {
   if (ids.campaignId) await mutate(s, token, 'campaigns', [{ remove: ids.campaignId }]);
 }
 export async function googleInsights(s: any, ids: AdIds): Promise<AdMetrics> {
-  if (!ids.campaignId) return { spendCents: 0, impressions: 0, clicks: 0 };
+  if (!ids.campaignId) return { spendCents: 0, impressions: 0, clicks: 0, conversions: 0 };
   const token = await accessToken(s);
   const cid = digits(s.customer_id);
-  const query = `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks FROM campaign WHERE campaign.resource_name = '${ids.campaignId}'`;
+  const query = `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE campaign.resource_name = '${ids.campaignId}'`;
   const res = await fetch(`${API}/customers/${cid}/googleAds:search`, {
     method: 'POST', headers: headers(token, s), body: JSON.stringify({ query }), signal: AbortSignal.timeout(20000),
   });
   const j: any = await readJson(res, 'googleAds:search');
   if (!res.ok || j.error) throw gerr('googleAds:search', j, res.status);
   const m = j.results?.[0]?.metrics || {};
-  return { spendCents: Math.round(Number(m.costMicros || 0) / 10_000), impressions: +(m.impressions || 0), clicks: +(m.clicks || 0) };
+  // For App campaigns conversions = installs (with conversion tracking configured).
+  return { spendCents: Math.round(Number(m.costMicros || 0) / 10_000), impressions: +(m.impressions || 0), clicks: +(m.clicks || 0), conversions: +(m.conversions || 0) };
 }
 
 export const googleProvider: AdProvider = {

@@ -16,7 +16,7 @@ import { redditAdsProvider } from './redditads';
 // Platform entity ids for one launched ad (stored on the action under `meta_ids`
 // for backwards-compat — the field is really "this ad's platform entity ids").
 export type AdIds = { campaignId: string; adsetId?: string; adId?: string; creativeId?: string; [k: string]: any };
-export type AdMetrics = { spendCents: number; impressions: number; clicks: number };
+export type AdMetrics = { spendCents: number; impressions: number; clicks: number; conversions: number };
 
 export interface AdProvider {
   key: string;

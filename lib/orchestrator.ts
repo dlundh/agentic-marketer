@@ -613,20 +613,31 @@ export async function runAdOptimizer(projectId: string): Promise<AdSyncResult> {
     if (m.ad_paused) continue; // already off — counted for spend, skip judgement
     // Evaluate this ad. CTR = clicks / impressions.
     const ctr = ins.impressions > 0 ? ins.clicks / ins.impressions : 0;
-    const dead = ins.spendCents >= AD_DEAD_SPEND_CENTS && ins.clicks === 0;
-    const weak = ins.spendCents >= AD_MIN_SPEND_CENTS && ins.impressions >= AD_MIN_IMPRESSIONS && ctr < AD_CTR_FLOOR;
-    if (optimize && (dead || weak)) {
-      const why = dead
-        ? `Auto-paused: spent $${(ins.spendCents / 100).toFixed(2)} with 0 clicks.`
-        : `Auto-paused: CTR ${(ctr * 100).toFixed(2)}% below ${(AD_CTR_FLOOR * 100).toFixed(1)}% floor after ${ins.impressions.toLocaleString()} impressions ($${(ins.spendCents / 100).toFixed(2)} spent).`;
+    const conv = ins.conversions || 0;
+    const cpa = conv > 0 ? Math.round(ins.spendCents / conv) : null; // cost per install/conversion
+    const perf = { spend_cents: ins.spendCents, impressions: ins.impressions, clicks: ins.clicks, ctr, conversions: conv, cpa_cents: cpa };
+    // A converting ad is a keeper — protect it from auto-pause regardless of CTR;
+    // installs/conversions are the real goal, not clicks.
+    const converting = conv >= 1;
+    const dead = !converting && ins.spendCents >= AD_DEAD_SPEND_CENTS && ins.clicks === 0;
+    const weak = !converting && ins.spendCents >= AD_MIN_SPEND_CENTS && ins.impressions >= AD_MIN_IMPRESSIONS && ctr < AD_CTR_FLOOR;
+    const why = dead
+      ? `spent $${(ins.spendCents / 100).toFixed(2)} with 0 clicks and 0 installs`
+      : weak
+      ? `CTR ${(ctr * 100).toFixed(2)}% below ${(AD_CTR_FLOOR * 100).toFixed(1)}% floor after ${ins.impressions.toLocaleString()} impressions, 0 installs ($${(ins.spendCents / 100).toFixed(2)} spent)`
+      : '';
+    if (why && optimize) {
+      // Autonomous / optimize modes: actually pause the loser.
       try {
         await provider.setStatus(s, ids, 'PAUSED');
-        updateAction(a.id, { meta: JSON.stringify({ ...m, ad_paused: true, paused_reason: why }), result: why });
-      } catch { /* try again next cycle */ }
+        updateAction(a.id, { meta: JSON.stringify({ ...m, perf, ad_paused: true, paused_reason: `Auto-paused: ${why}.`, recommend_pause: undefined }), result: `Auto-paused: ${why}.` });
+      } catch { updateAction(a.id, { meta: JSON.stringify({ ...m, perf }) }); }
+    } else if (why) {
+      // Approval mode: don't touch it — surface a recommendation for the human.
+      updateAction(a.id, { meta: JSON.stringify({ ...m, perf, recommend_pause: `Underperforming — ${why}. Consider pausing or revising.` }) });
     } else {
-      // Keep a fresh performance snapshot on the action for the UI.
-      const perf = { spend_cents: ins.spendCents, impressions: ins.impressions, clicks: ins.clicks, ctr };
-      if (JSON.stringify(m.perf) !== JSON.stringify(perf)) updateAction(a.id, { meta: JSON.stringify({ ...m, perf }) });
+      // Performing or still testing — refresh the snapshot, clear any stale recommendation.
+      updateAction(a.id, { meta: JSON.stringify({ ...m, perf, recommend_pause: undefined }) });
     }
   }
   if (synced > 0) {

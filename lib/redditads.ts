@@ -104,15 +104,15 @@ export async function removeRedditAd(s: any, ids: AdIds) {
   if (ids.campaignId) await rfetch(s, token, 'DELETE', `/ad_accounts/${acct}/campaigns/${ids.campaignId}`);
 }
 export async function redditInsights(s: any, ids: AdIds): Promise<AdMetrics> {
-  if (!ids.campaignId) return { spendCents: 0, impressions: 0, clicks: 0 };
+  if (!ids.campaignId) return { spendCents: 0, impressions: 0, clicks: 0, conversions: 0 };
   const acct = s.ad_account_id; const token = await accessToken(s);
   // Lifetime metrics for the campaign.
   const j = await rfetch(s, token, 'POST', `/ad_accounts/${acct}/reports`, {
-    breakdowns: ['CAMPAIGN_ID'], fields: ['spend', 'impressions', 'clicks'], time_zone_id: 'GMT',
+    breakdowns: ['CAMPAIGN_ID'], fields: ['spend', 'impressions', 'clicks', 'conversions'], time_zone_id: 'GMT',
     filters: [{ filter: 'CAMPAIGN_ID', operator: 'EQUALS', values: [ids.campaignId] }],
   });
   const row = (j.data?.metrics || j.data || [])[0] || {};
-  return { spendCents: Math.round(Number(row.spend || 0) / 10_000), impressions: +(row.impressions || 0), clicks: +(row.clicks || 0) };
+  return { spendCents: Math.round(Number(row.spend || 0) / 10_000), impressions: +(row.impressions || 0), clicks: +(row.clicks || 0), conversions: +(row.conversions || row.app_install || 0) };
 }
 
 export const redditAdsProvider: AdProvider = {

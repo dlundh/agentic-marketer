@@ -125,11 +125,14 @@ export async function setMetaStatus(token: string, id: string, status: 'ACTIVE' 
 export async function setAdSetDailyBudget(token: string, adsetId: string, cents: number) {
   return gpost(`/${adsetId}`, token, { daily_budget: String(cents) });
 }
-// Total spend (cents) + key metrics for a campaign, lifetime.
-export async function campaignInsights(token: string, campaignId: string): Promise<{ spendCents: number; impressions: number; clicks: number }> {
-  const j = await gget(`/${campaignId}/insights`, { access_token: token, fields: 'spend,impressions,clicks', date_preset: 'maximum' });
+// Total spend (cents) + key metrics for a campaign, lifetime — including
+// conversions (app installs / purchases / leads / sign-ups) parsed from `actions`.
+export async function campaignInsights(token: string, campaignId: string): Promise<{ spendCents: number; impressions: number; clicks: number; conversions: number }> {
+  const j = await gget(`/${campaignId}/insights`, { access_token: token, fields: 'spend,impressions,clicks,actions', date_preset: 'maximum' });
   const row = (j.data || [])[0] || {};
-  return { spendCents: Math.round(parseFloat(row.spend || '0') * 100), impressions: +(row.impressions || 0), clicks: +(row.clicks || 0) };
+  const CONV = /(install|purchase|lead|complete_registration|subscribe|start_trial)/i;
+  const conversions = (row.actions || []).reduce((s: number, a: any) => s + (CONV.test(a.action_type || '') ? Number(a.value || 0) : 0), 0);
+  return { spendCents: Math.round(parseFloat(row.spend || '0') * 100), impressions: +(row.impressions || 0), clicks: +(row.clicks || 0), conversions };
 }
 
 // ---- Provider adapter (uniform across Meta / Google / Reddit) --------------
@@ -149,6 +152,6 @@ export const metaProvider: AdProvider = {
   },
   async remove(s, ids) { if (ids.campaignId) await deleteMetaEntity(s.access_token, ids.campaignId); },
   async insights(s, ids) {
-    return ids.campaignId ? campaignInsights(s.access_token, ids.campaignId) : { spendCents: 0, impressions: 0, clicks: 0 };
+    return ids.campaignId ? campaignInsights(s.access_token, ids.campaignId) : { spendCents: 0, impressions: 0, clicks: 0, conversions: 0 };
   },
 };
