@@ -45,13 +45,15 @@ async function readJson(res: Response, where: string): Promise<any> {
 }
 
 function gerr(path: string, j: any, status: number): Error {
-  // Google Ads surfaces the real reason under error.details[].errors[].message,
-  // and WHICH field under errors[].location.fieldPathElements.
+  // Google Ads surfaces the real reason under error.details[].errors[]: a human
+  // message, the specific error CODE (errorCode is {category: ENUM}), and WHICH
+  // field (location.fieldPathElements). The code is the most diagnostic part.
   const e = j?.error || {};
   const deep = e.details?.[0]?.errors?.[0];
   const msg = deep?.message || e.message || `HTTP ${status}`;
+  const code = deep?.errorCode ? Object.entries(deep.errorCode).map(([k, v]) => `${k}=${v}`).join(', ') : '';
   const field = (deep?.location?.fieldPathElements || []).map((f: any) => f.fieldName).filter(Boolean).join('.');
-  return new Error(`Google Ads ${path}: ${msg}${field ? ` [field: ${field}]` : ''}`);
+  return new Error(`Google Ads ${path}: ${msg}${code ? ` [${code}]` : ''}${field ? ` [field: ${field}]` : ''}`);
 }
 
 // ---- OAuth ----------------------------------------------------------------
