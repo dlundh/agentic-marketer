@@ -45,11 +45,13 @@ async function readJson(res: Response, where: string): Promise<any> {
 }
 
 function gerr(path: string, j: any, status: number): Error {
-  // Google Ads surfaces the real reason under error.details[].errors[].message.
+  // Google Ads surfaces the real reason under error.details[].errors[].message,
+  // and WHICH field under errors[].location.fieldPathElements.
   const e = j?.error || {};
   const deep = e.details?.[0]?.errors?.[0];
   const msg = deep?.message || e.message || `HTTP ${status}`;
-  return new Error(`Google Ads ${path}: ${msg}`);
+  const field = (deep?.location?.fieldPathElements || []).map((f: any) => f.fieldName).filter(Boolean).join('.');
+  return new Error(`Google Ads ${path}: ${msg}${field ? ` [field: ${field}]` : ''}`);
 }
 
 // ---- OAuth ----------------------------------------------------------------
@@ -162,10 +164,13 @@ export async function launchGoogleAd(s: any, spec: AdSpec): Promise<AdIds> {
     if (!s.app_id) throw new Error('App campaign needs the app’s store ID — set it under ⚙ Channels → Google Ads.');
     const appStore = s.app_store === 'APPLE_APP_STORE' || s.app_store === 'GOOGLE_APP_STORE'
       ? s.app_store : (/^\d+$/.test(String(s.app_id)) ? 'APPLE_APP_STORE' : 'GOOGLE_APP_STORE');
+    // App campaigns require an explicit bidding strategy. Use target-CPA install
+    // bidding with a target ≈ the daily budget (a conservative test target).
     const campaign = await mutate(s, token, 'campaigns', [{ create: {
       name: stamp, status: 'PAUSED', advertisingChannelType: 'MULTI_CHANNEL', advertisingChannelSubType: 'APP_CAMPAIGN',
       campaignBudget: budget,
-      appCampaignSetting: { appId: String(s.app_id), appStore, biddingStrategyGoalType: 'OPTIMIZE_INSTALLS_WITHOUT_TARGET_INSTALL_COST' },
+      appCampaignSetting: { appId: String(s.app_id), appStore, biddingStrategyGoalType: 'OPTIMIZE_INSTALLS_TARGET_INSTALL_COST' },
+      targetCpa: { targetCpaMicros: String(micros) },
     } }]);
     try {
       const adGroup = await mutate(s, token, 'adGroups', [{ create: { name: `${stamp} — ad group`, campaign, status: 'ENABLED' } }]);
