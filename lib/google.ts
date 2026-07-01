@@ -189,7 +189,8 @@ export async function launchGoogleAd(s: any, spec: AdSpec): Promise<AdIds> {
       // App campaigns use image ASSETS (not a URL) — upload the chosen image first.
       const imgAsset = spec.imageUrl ? await uploadImageAsset(s, token, spec.imageUrl) : null;
       if (imgAsset) appAd.images = [{ asset: imgAsset }];
-      const adGroupAd = await mutate(s, token, 'adGroupAds', [{ create: { adGroup, status: 'PAUSED', ad: { appAd } } }]);
+      // App ads can't be paused at the ad level — the PAUSED campaign gates serving.
+      const adGroupAd = await mutate(s, token, 'adGroupAds', [{ create: { adGroup, status: 'ENABLED', ad: { appAd } } }]);
       return { campaignId: campaign, adsetId: adGroup, adId: adGroupAd, budgetId: budget };
     } catch (e) {
       try { await mutate(s, token, 'campaigns', [{ remove: campaign }]); } catch { /* best effort cleanup */ }
