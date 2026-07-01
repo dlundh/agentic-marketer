@@ -53,7 +53,14 @@ function gerr(path: string, j: any, status: number): Error {
   const msg = deep?.message || e.message || `HTTP ${status}`;
   const code = deep?.errorCode ? Object.entries(deep.errorCode).map(([k, v]) => `${k}=${v}`).join(', ') : '';
   const field = (deep?.location?.fieldPathElements || []).map((f: any) => f.fieldName).filter(Boolean).join('.');
-  return new Error(`Google Ads ${path}: ${msg}${code ? ` [${code}]` : ''}${field ? ` [field: ${field}]` : ''}`);
+  // Translate common, non-obvious Google error enums into an actionable hint.
+  const codeStr = JSON.stringify(deep?.errorCode || {});
+  const hint =
+    /OPERATION_NOT_PERMITTED_FOR_CONTEXT/.test(codeStr) ? ' — your Customer ID looks like a MANAGER (MCC) account; campaigns can only run on a client ad account under it. Set Customer ID to the client account and the manager in the Manager (MCC) ID field (⚙ Channels → Google Ads).'
+    : /CUSTOMER_NOT_ENABLED|BILLING/i.test(codeStr) ? ' — the ad account isn’t fully enabled (add a payment method / billing in Google Ads).'
+    : /DEVELOPER_TOKEN|NOT_APPROVED|TEST_ACCOUNT/i.test(codeStr) ? ' — your developer token likely only has test-account access; apply for Basic access in the Google Ads API Center.'
+    : '';
+  return new Error(`Google Ads ${path}: ${msg}${code ? ` [${code}]` : ''}${field ? ` [field: ${field}]` : ''}${hint}`);
 }
 
 // ---- OAuth ----------------------------------------------------------------
