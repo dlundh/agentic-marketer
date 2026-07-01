@@ -180,6 +180,7 @@ export async function launchGoogleAd(s: any, spec: AdSpec): Promise<AdIds> {
       campaignBudget: budget,
       appCampaignSetting: { appId: String(s.app_id), appStore, biddingStrategyGoalType: 'OPTIMIZE_INSTALLS_TARGET_INSTALL_COST' },
       targetCpa: { targetCpaMicros: String(micros) },
+      containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
     } }]);
     try {
       const adGroup = await mutate(s, token, 'adGroups', [{ create: { name: `${stamp} — ad group`, campaign, status: 'ENABLED' } }]);
@@ -200,6 +201,7 @@ export async function launchGoogleAd(s: any, spec: AdSpec): Promise<AdIds> {
   const campaign = await mutate(s, token, 'campaigns', [{ create: {
     name: stamp, status: 'PAUSED', advertisingChannelType: 'SEARCH', campaignBudget: budget,
     manualCpc: {}, networkSettings: { targetGoogleSearch: true, targetSearchNetwork: true, targetContentNetwork: false },
+    containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
   } }]);
   try {
     const adGroup = await mutate(s, token, 'adGroups', [{ create: {
