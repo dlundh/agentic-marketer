@@ -505,3 +505,55 @@ a { color: var(--accent); }
   .side-foot { margin: 0; }
   .main { padding: 16px; }
 }
+
+/* ============================ Ad previews ============================ */
+.ads-view { display: flex; flex-direction: column; gap: 26px; }
+.adp-group { display: flex; flex-direction: column; gap: 12px; }
+.adp-grouphead { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+.adp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+
+.adp { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
+.adp-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.adp-net { font-size: 10.5px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); }
+.adp-angle { font-size: 10.5px; color: var(--accent); background: rgba(124,124,240,.12); border-radius: 6px; padding: 2px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.adp-chip { margin-left: auto; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; padding: 3px 8px; border-radius: 6px; }
+.adp-chip.live { color: var(--green); background: rgba(61,220,151,.14); }
+.adp-chip.paused { color: var(--amber); background: rgba(245,177,76,.14); }
+.adp-chip.prop { color: var(--amber); background: rgba(245,177,76,.12); }
+.adp-chip.ready { color: var(--accent); background: rgba(124,124,240,.14); }
+.adp-chip.fail { color: var(--red); background: rgba(240,107,107,.14); }
+
+/* Meta-style feed ad (light, like the real platform) */
+.adp-meta { background: #fff; color: #050505; }
+.adp-brandrow { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+.adp-avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #7c7cf0, #3ddc97); color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+.adp-brand { font-size: 13px; font-weight: 700; color: #050505; }
+.adp-spon { font-size: 11px; color: #65676b; }
+.adp-primary { padding: 2px 12px 10px; font-size: 13.5px; line-height: 1.4; color: #050505; white-space: pre-wrap; }
+.adp-creative { background: #dfe3ee; }
+.adp-creative img { display: block; width: 100%; max-height: 300px; object-fit: cover; }
+.adp-creative.noimg img { display: none; }
+.adp-noimg { padding: 34px 12px; text-align: center; color: #8a8d91; font-size: 12px; }
+.adp-cap { display: flex; align-items: center; gap: 10px; background: #f0f2f5; padding: 10px 12px; }
+.adp-capmeta { flex: 1; min-width: 0; }
+.adp-caphead { font-size: 14px; font-weight: 700; color: #050505; line-height: 1.25; }
+.adp-capdesc { font-size: 12px; color: #65676b; margin-top: 2px; }
+.adp-ctabtn { flex-shrink: 0; background: #e4e6eb; color: #050505; border: none; border-radius: 7px; padding: 8px 14px; font-size: 13px; font-weight: 700; }
+
+/* Google search-ad style (light, text) */
+.adp-google { background: #fff; color: #202124; padding: 14px 14px 16px; }
+.gad-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.gad-ad { color: #202124; font-weight: 700; }
+.gad-url { color: #5f6368; }
+.gad-title { color: #1a0dab; font-size: 18px; line-height: 1.3; margin-top: 6px; }
+.gad-desc { color: #4d5156; font-size: 13px; line-height: 1.45; margin-top: 4px; }
+
+/* perf + controls (dark chrome) */
+.adp-perf { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 9px 12px; font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--border); }
+.adp-perf i { font-style: normal; opacity: .6; }
+.adp-win { color: var(--green); font-weight: 700; }
+.adp-nostat { font-style: italic; }
+.adp-ctrls { display: flex; gap: 8px; padding: 0 12px 12px; }
+.adp-ctrls .approve-mini { color: var(--green); border-color: rgba(61,220,151,.4); }
+.adp-ctrls .approve-mini:hover:not(:disabled) { background: rgba(61,220,151,.12); }
+.live-badge { background: var(--green); color: #032; }

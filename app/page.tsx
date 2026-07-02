@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dashboard, GodView } from './dashboard';
+import { AdsView } from './ads';
 
 // ----------------------------- types ---------------------------------------
 type Job = {
@@ -46,7 +47,7 @@ export default function Page() {
   const [showJobs, setShowJobs] = useState(true);
   const [showLists, setShowLists] = useState(false);
   const [showAdImages, setShowAdImages] = useState(false);
-  const [view, setView] = useState<'dashboard' | 'queue' | 'agents'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'ads' | 'queue' | 'agents'>('dashboard');
   const [showLaunch, setShowLaunch] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -249,8 +250,10 @@ export default function Page() {
 
   const appId = currentId && currentId !== 'all' ? currentId : null;
   const needsApproval = detail ? detail.actions.filter((a) => ['proposed', 'revising'].includes(a.status)).length : 0;
-  const NAV: { k: 'dashboard' | 'queue' | 'agents'; label: string; icon: string }[] = [
+  const liveAdCount = detail ? detail.actions.filter((a) => a.kind === 'ad' && a.status === 'done' && !(() => { try { return JSON.parse(a.meta || '{}').ad_paused; } catch { return false; } })()).length : 0;
+  const NAV: { k: 'dashboard' | 'ads' | 'queue' | 'agents'; label: string; icon: string }[] = [
     { k: 'dashboard', label: 'Dashboard', icon: '📊' },
+    { k: 'ads', label: 'Ads', icon: '📣' },
     { k: 'queue', label: 'Action queue', icon: '✅' },
     { k: 'agents', label: 'Agents & activity', icon: '🤖' },
   ];
@@ -273,6 +276,7 @@ export default function Page() {
               <button key={n.k} className={view === n.k ? 'on' : ''} onClick={() => setView(n.k)}>
                 <span className="side-ico">{n.icon}</span>{n.label}
                 {n.k === 'queue' && needsApproval > 0 && <span className="nav-badge">{needsApproval}</span>}
+                {n.k === 'ads' && liveAdCount > 0 && <span className="nav-badge live-badge">{liveAdCount}</span>}
               </button>
             ))}
             <div className="side-sep">Setup</div>
@@ -316,6 +320,11 @@ export default function Page() {
             <AgentsWorking jobs={detail.jobs} />
 
             {view === 'dashboard' && <Dashboard detail={detail as any} />}
+
+            {view === 'ads' && (
+              <AdsView projectId={detail.project.id} actions={detail.actions as any} advertiser={detail.project.title}
+                onAdControl={adControl} onDecide={(id, x) => decide(id, x)} />
+            )}
 
             {view === 'queue' && (
               <>
