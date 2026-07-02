@@ -32,7 +32,7 @@ export const CHANNELS: ChannelDef[] = [
 
   { key: 'x', label: 'X / Twitter', category: 'organic', executor: 'webhook' },
   { key: 'linkedin', label: 'LinkedIn', category: 'organic', executor: 'webhook' },
-  { key: 'reddit', label: 'Reddit', category: 'community', executor: 'webhook' },
+  { key: 'reddit', label: 'Reddit', category: 'community', executor: 'webhook', note: 'Posts + genuine replies to relevant subreddits. Since Nov 2025 Reddit requires pre-approval for API access — create a "web app", agree to the Responsible Builder Policy, and submit the access request (~2–4 weeks) before it works.' },
   { key: 'instagram', label: 'Instagram', category: 'organic', executor: 'webhook' },
   { key: 'tiktok', label: 'TikTok', category: 'organic', executor: 'webhook' },
   { key: 'facebook', label: 'Facebook', category: 'organic', executor: 'webhook' },
