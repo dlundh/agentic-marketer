@@ -15,6 +15,11 @@ reload or a full server restart.
 
 ## Highlights
 
+- **Dashboard web app** — a sidebar shell with an app switcher and a per-app
+  **Dashboard** (KPIs + Recharts graphs: spend/installs trend, spend & CTR by
+  channel/ad, action pipeline, posts by channel), an **Action queue**, and an
+  **Agents & activity** feed. An **All apps** god-view rolls up spend, installs,
+  live ads and posts across everything you're marketing.
 - **Three phases, hands-off**: research → go-to-market plan → an execution swarm
   that proposes (or autonomously runs) real marketing actions.
 - **Competitive advantage analysis**: a dedicated agent tears down how the top
@@ -346,7 +351,8 @@ Meta/Google ad accounts needs HTTPS — see
 
 | Path | Purpose |
 |------|---------|
-| `app/page.tsx` | The single-page UI: search box, live job feed, history, campaign panel, modals |
+| `app/page.tsx` | App shell: sidebar + view routing (Dashboard / Queue / Agents), campaign panel, modals |
+| `app/dashboard.tsx` | Dashboard + all-apps god view (Recharts KPIs & graphs) |
 | `app/api/*` | REST + SSE endpoints (projects, jobs, actions, connectors, campaign, lists, directives, oauth) |
 | `lib/db.ts` | SQLite schema + queries: projects, jobs, per-project connectors, budget ledger, scheduling, email lists, directives |
 | `lib/orchestrator.ts` | Job lifecycle, pause/resume, phase transitions, campaign + budget controls, approve/execute, smart scheduler + ad optimizer |

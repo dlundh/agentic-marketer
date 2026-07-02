@@ -193,6 +193,19 @@ function init(): DatabaseSync {
       created_at  INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_ad_images_proj ON ad_images(project_id);
+
+    -- Daily ad-metrics snapshots per campaign, so the dashboard can draw real
+    -- spend/installs/clicks trend lines over time (accrued going forward).
+    CREATE TABLE IF NOT EXISTS metrics_daily (
+      campaign_id TEXT NOT NULL,
+      day         TEXT NOT NULL,               -- YYYY-MM-DD (local)
+      spend_cents INTEGER NOT NULL DEFAULT 0,
+      installs    REAL NOT NULL DEFAULT 0,
+      clicks      INTEGER NOT NULL DEFAULT 0,
+      impressions INTEGER NOT NULL DEFAULT 0,
+      updated_at  INTEGER NOT NULL,
+      PRIMARY KEY (campaign_id, day)
+    );
   `);
 
   // Migrations: add columns to DBs created before they existed.
@@ -567,6 +580,46 @@ export const listAdImages = (projectId: string) =>
   db.prepare(`SELECT * FROM ad_images WHERE project_id=? ORDER BY created_at ASC`).all(projectId) as AdImage[];
 export const deleteAdImage = (id: string) => { db.prepare(`DELETE FROM ad_images WHERE id=?`).run(id); };
 export const adImageUrls = (projectId: string): string[] => listAdImages(projectId).map((r) => r.url);
+
+// --- daily metrics snapshots ------------------------------------------------
+export type DailyMetric = { day: string; spend_cents: number; installs: number; clicks: number; impressions: number };
+const localDay = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+// Upsert today's cumulative snapshot for a campaign (idempotent set, not add).
+export function recordDailyMetric(campaignId: string, m: { spend_cents: number; installs: number; clicks: number; impressions: number }) {
+  db.prepare(
+    `INSERT INTO metrics_daily (campaign_id,day,spend_cents,installs,clicks,impressions,updated_at)
+     VALUES (?,?,?,?,?,?,?)
+     ON CONFLICT(campaign_id,day) DO UPDATE SET spend_cents=excluded.spend_cents, installs=excluded.installs, clicks=excluded.clicks, impressions=excluded.impressions, updated_at=excluded.updated_at`
+  ).run(campaignId, localDay(), Math.round(m.spend_cents || 0), m.installs || 0, Math.round(m.clicks || 0), Math.round(m.impressions || 0), now());
+}
+export const listDailyMetrics = (campaignId: string, days = 30): DailyMetric[] =>
+  db.prepare(`SELECT day, spend_cents, installs, clicks, impressions FROM metrics_daily WHERE campaign_id=? ORDER BY day DESC LIMIT ?`).all(campaignId, days).reverse() as DailyMetric[];
+
+// Rolled-up marketing stats for one project — powers the dashboard god view.
+export function projectDashboardStats(projectId: string) {
+  const c = getCampaignByProject(projectId);
+  if (!c) return { has_campaign: false as const };
+  const acts = listActions(c.id);
+  const meta = (m: string | null) => { try { return m ? JSON.parse(m) : {}; } catch { return {}; } };
+  let installs = 0, adSpend = 0, liveAds = 0, clicks = 0, impressions = 0, published = 0, scheduled = 0, proposed = 0;
+  for (const a of acts) {
+    const m = meta(a.meta);
+    if (a.status === 'proposed') proposed++;
+    if (a.kind === 'ad') {
+      if (a.status === 'done' && !m.ad_paused) liveAds++;
+      if (m.perf) { installs += m.perf.conversions || 0; adSpend += m.perf.spend_cents || 0; clicks += m.perf.clicks || 0; impressions += m.perf.impressions || 0; }
+    } else {
+      if (['done', 'sent'].includes(a.status)) published++;
+      else if (a.status === 'scheduled') scheduled++;
+    }
+  }
+  return {
+    has_campaign: true as const, status: c.status, autonomy: c.autonomy, auto_posts: !!c.auto_posts,
+    budget_cents: c.budget_cents, spent_cents: c.spent_cents, remaining_cents: c.budget_cents - c.spent_cents,
+    daily_cap_cents: c.daily_cap_cents, live_ads: liveAds, installs, ad_spend_cents: adSpend, clicks, impressions,
+    published, scheduled, proposed,
+  };
+}
 // Formatted block for injecting into agent prompts.
 export function directivesText(projectId: string): string {
   const ds = listDirectives(projectId);

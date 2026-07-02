@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   getProject, listJobs, listFindings, listFiles, listActivity,
-  getCampaignByProject, listActions, listEmailLists, listDirectives,
+  getCampaignByProject, listActions, listEmailLists, listDirectives, listDailyMetrics,
 } from '@/lib/db';
 import { isRunning, autonomousTick, setProjectPaused, removeProject } from '@/lib/orchestrator';
 import { isAutoExecutable } from '@/lib/connectors';
@@ -54,5 +54,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     actions,
     lists: listEmailLists(id),
     directives: listDirectives(id),
+    metrics: campaign ? listDailyMetrics(campaign.id, 60) : [],
   });
 }

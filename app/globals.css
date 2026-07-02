@@ -426,3 +426,82 @@ a { color: var(--accent); }
 .guide code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: var(--bg-soft); border: 1px solid var(--border); padding: 1px 5px; border-radius: 5px; color: var(--green); }
 .guide a { color: var(--accent); }
 .note code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; background: var(--bg-soft); border: 1px solid var(--border); padding: 1px 5px; border-radius: 5px; color: var(--green); }
+
+/* ============================ App shell (sidebar) ============================ */
+.app-shell { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 232px; flex-shrink: 0; position: sticky; top: 0; height: 100vh;
+  display: flex; flex-direction: column; gap: 14px; padding: 18px 14px;
+  background: rgba(11,11,20,.6); border-right: 1px solid var(--border); backdrop-filter: blur(8px);
+}
+.sidebar .brand { font-size: 15px; padding: 0 6px; }
+.side-apps { display: flex; flex-direction: column; gap: 8px; }
+.app-switch {
+  width: 100%; background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  border-radius: 10px; padding: 9px 10px; font-size: 13px; font-weight: 600; font-family: inherit; outline: none; cursor: pointer;
+}
+.app-switch:focus { border-color: var(--accent); }
+.side-new { background: transparent; border: 1px dashed var(--border); color: var(--muted); border-radius: 9px; padding: 7px; font-size: 12.5px; cursor: pointer; }
+.side-new:hover { color: var(--accent); border-color: var(--accent); }
+.side-nav { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.side-nav button {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  background: transparent; border: none; color: var(--muted); border-radius: 9px;
+  padding: 9px 10px; font-size: 13.5px; font-family: inherit; cursor: pointer; position: relative;
+}
+.side-nav button:hover { background: var(--bg-soft); color: var(--text); }
+.side-nav button.on { background: rgba(124,124,240,.16); color: var(--text); font-weight: 600; }
+.side-ico { width: 18px; text-align: center; font-size: 13px; }
+.nav-badge { margin-left: auto; background: var(--amber); color: #1a1200; font-size: 10.5px; font-weight: 800; border-radius: 9px; padding: 1px 7px; }
+.side-sep { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); opacity: .6; padding: 12px 10px 4px; }
+.side-foot { margin-top: auto; }
+.side-foot .connect { width: 100%; justify-content: center; }
+
+.main { flex: 1; min-width: 0; padding: 24px 30px 80px; }
+.main-center { max-width: 760px; margin: 40px auto 0; }
+.main .banner { margin-bottom: 16px; }
+.main-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+.main-head h1 { font-size: 22px; margin: 0; display: flex; align-items: center; gap: 10px; }
+.main-head .note { margin-top: 4px; }
+.main-head-actions { display: flex; gap: 8px; }
+
+/* ============================ Dashboard ============================ */
+.dash { display: flex; flex-direction: column; gap: 18px; }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 15px; }
+.kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.kpi-value { font-size: 24px; font-weight: 800; margin-top: 4px; line-height: 1.1; }
+.kpi-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+.dash-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
+.dash-panel-head { font-size: 13px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+.dash-panel-hint { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+.dash-empty { height: 200px; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); font-size: 12.5px; padding: 0 20px; line-height: 1.6; }
+.dash-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: center; margin-top: 8px; font-size: 11px; color: var(--muted); }
+.dash-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.dash-legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
+/* God view */
+.godgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.godcard { text-align: left; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 15px; cursor: pointer; transition: border-color .15s, transform .1s; display: flex; flex-direction: column; gap: 10px; font-family: inherit; color: var(--text); }
+.godcard:hover { border-color: var(--accent); transform: translateY(-2px); }
+.godcard-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.godcard-title { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.godcard-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+.godcard-stats b { color: var(--text); }
+.godcard-meter { height: 5px; border-radius: 3px; background: var(--bg-soft); overflow: hidden; }
+.godcard-meter div { height: 100%; background: linear-gradient(90deg, var(--green), var(--amber)); }
+.godcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--muted); }
+.godcard-badge { background: rgba(245,177,76,.16); color: var(--amber); font-weight: 700; border-radius: 8px; padding: 1px 7px; }
+.phasechip { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; padding: 2px 7px; border-radius: 6px; background: var(--bg-soft); color: var(--muted); }
+.phasechip.phase-execution { color: var(--green); background: rgba(61,220,151,.12); }
+.phasechip.phase-research, .phasechip.phase-marketing { color: var(--blue); background: rgba(107,184,240,.12); }
+
+@media (max-width: 720px) {
+  .app-shell { flex-direction: column; }
+  .sidebar { width: auto; height: auto; position: static; flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .side-nav { flex-direction: row; flex-wrap: wrap; }
+  .side-sep { display: none; }
+  .side-foot { margin: 0; }
+  .main { padding: 16px; }
+}

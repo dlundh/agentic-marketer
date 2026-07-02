@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Dashboard, GodView } from './dashboard';
 
 // ----------------------------- types ---------------------------------------
 type Job = {
@@ -45,6 +46,7 @@ export default function Page() {
   const [showJobs, setShowJobs] = useState(true);
   const [showLists, setShowLists] = useState(false);
   const [showAdImages, setShowAdImages] = useState(false);
+  const [view, setView] = useState<'dashboard' | 'queue' | 'agents'>('dashboard');
   const [showLaunch, setShowLaunch] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -83,7 +85,7 @@ export default function Page() {
     });
   }, [loadAuth, loadProjects]);
 
-  useEffect(() => { if (currentId) loadDetail(currentId); }, [currentId, loadDetail]);
+  useEffect(() => { if (currentId && currentId !== 'all') loadDetail(currentId); }, [currentId, loadDetail]);
 
   // ---- SSE live updates ----
   const currentRef = useRef<string | null>(null);
@@ -93,7 +95,7 @@ export default function Page() {
     let t: any;
     const refresh = () => { clearTimeout(t); t = setTimeout(() => {
       loadProjects();
-      if (currentRef.current) loadDetail(currentRef.current);
+      if (currentRef.current && currentRef.current !== 'all') loadDetail(currentRef.current);
     }, 250); };
     es.onmessage = (e) => {
       try { const ev = JSON.parse(e.data); if (ev.type !== 'hello') refresh(); } catch {}
@@ -110,6 +112,7 @@ export default function Page() {
     if (!res.ok) { setError(d.error || 'Failed to start.'); return; }
     await loadProjects();
     setCurrentId(d.project.id);
+    setView('agents'); // new project → watch research run
     if (!auth?.connected) setShowConnect(true);
   };
 
@@ -244,132 +247,126 @@ export default function Page() {
 
   const modalJob = detail?.jobs.find((j) => j.id === modalJobId) || null;
 
+  const appId = currentId && currentId !== 'all' ? currentId : null;
+  const needsApproval = detail ? detail.actions.filter((a) => ['proposed', 'revising'].includes(a.status)).length : 0;
+  const NAV: { k: 'dashboard' | 'queue' | 'agents'; label: string; icon: string }[] = [
+    { k: 'dashboard', label: 'Dashboard', icon: '📊' },
+    { k: 'queue', label: 'Action queue', icon: '✅' },
+    { k: 'agents', label: 'Agents & activity', icon: '🤖' },
+  ];
+
   return (
-    <>
-      <div className="topbar">
+    <div className="app-shell">
+      <aside className="sidebar">
         <div className="brand"><span className="dot" /> Agentic Marketer</div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <button className="connect" onClick={() => setShowChannels(true)}>⚙ Channels</button>
-          <button className={`connect ${auth?.connected ? 'on' : 'off'}`} onClick={() => setShowConnect(true)}>
-            <span className="pip" />
-            {auth?.connected ? 'Claude connected' : 'Connect Claude'}
-          </button>
+        <div className="side-apps">
+          <select className="app-switch" value={currentId ?? 'all'} onChange={(e) => { setCurrentId(e.target.value); setView('dashboard'); }}>
+            <option value="all">🌐 All apps</option>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select>
+          <button className="side-new" title="Market a new app or service" onClick={() => setCurrentId(null)}>＋ New app</button>
         </div>
-      </div>
 
-      <div className="wrap">
-        <Hero onSubmit={onSubmit} />
-        {notice && <div className="banner ok" style={{ marginTop: 20 }}>{notice}</div>}
-        {error && <div className="banner" style={{ marginTop: 20 }}>{error}</div>}
-
-        {/* ACTIVE PROJECT */}
-        {detail && (
-          <div className="section">
-            <h2 className="section-toggle" onClick={() => setShowJobs((v) => !v)} style={{ cursor: 'pointer' }}>
-              <span className="caret">{showJobs ? '▾' : '▸'}</span> Active · {detail.project.title}
-              {' '}<PhaseChip phase={detail.project.phase} />
-              {!showJobs && <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>· {detail.jobs.length} agent{detail.jobs.length === 1 ? '' : 's'} hidden</span>}
-            </h2>
-            <AgentsWorking jobs={detail.jobs} />
-            <DirectionBox directives={detail.directives || []} onAdd={addDirection} />
-            <CompetitivePanel
-              analyzed={detail.findings.filter((f) => f.category === 'competitor').length}
-              files={detail.files.filter((f) => /competitive/i.test(f.name))}
-              live={detail.jobs.some((j) => j.kind === 'competitive' && j.live)}
-              onRun={runCompetitors}
-            />
-            {showJobs && (
-              <div className="jobs">
-                {detail.jobs.map((j) => (
-                  <JobCard
-                    key={j.id}
-                    job={j}
-                    onOpen={() => setModalJobId(j.id)}
-                    onControl={control}
-                  />
-                ))}
-                {detail.jobs.length === 0 && <div className="empty">No jobs yet.</div>}
-              </div>
-            )}
-
-            {/* Execution phase: campaign + action queue, or a CTA to launch it */}
-            {detail.campaign ? (
-              <CampaignPanel
-                campaign={detail.campaign}
-                actions={detail.actions}
-                onDecide={decide}
-                onRevise={revise}
-                onOptimize={optimize}
-                onGenerate={generate}
-                onOpenChannels={() => setShowChannels(true)}
-                onOpenLists={() => setShowLists(true)}
-                onOpenAdImages={() => setShowAdImages(true)}
-                onCampaignAction={campaignAction}
-                onAdControl={adControl}
-                lists={detail.lists || []}
-                anyExecLive={detail.jobs.some((j) => j.phase === 'execution' && j.live)}
-              />
-            ) : ['marketing', 'done'].includes(detail.project.phase) && !detail.jobs.some((j) => j.live) ? (
-              <div className="launch-cta">
-                <div>
-                  <div className="lc-title">🚀 Ready to execute</div>
-                  <div className="note">Research and the marketing plan are done. Launch the growth swarm to start proposing real actions to reach customers — within a budget you set (even $0).</div>
-                </div>
-                <button className="submit" onClick={() => setShowLaunch(true)}>Launch growth campaign →</button>
-              </div>
-            ) : null}
-          </div>
+        {appId && detail && (
+          <nav className="side-nav">
+            {NAV.map((n) => (
+              <button key={n.k} className={view === n.k ? 'on' : ''} onClick={() => setView(n.k)}>
+                <span className="side-ico">{n.icon}</span>{n.label}
+                {n.k === 'queue' && needsApproval > 0 && <span className="nav-badge">{needsApproval}</span>}
+              </button>
+            ))}
+            <div className="side-sep">Setup</div>
+            <button onClick={() => setShowChannels(true)}><span className="side-ico">⚙</span>Channels</button>
+            <button onClick={() => setShowLists(true)}><span className="side-ico">✉️</span>Email lists</button>
+            <button onClick={() => setShowAdImages(true)}><span className="side-ico">🖼</span>Ad images</button>
+          </nav>
         )}
 
-        {/* HISTORY */}
-        <div className="section">
-          <h2>History</h2>
-          {projects.length === 0 ? (
-            <div className="empty">Nothing yet. Describe a product above to dispatch your first research agents.</div>
-          ) : (
-            <div className="hist">
-              {projects.map((p) => {
-                const paused = p.campaign_status === 'paused';
-                const pausable = p.campaign_status === 'active' || p.live;
-                return (
-                <div key={p.id} className="hist-card" onClick={() => setCurrentId(p.id)}>
-                  <div className="hist-card-top">
-                    <div className="t">{p.title}</div>
-                    <div className="hist-actions" onClick={(e) => e.stopPropagation()}>
-                      {paused
-                        ? <button className="mini" title="Resume autonomous marketing for this app" onClick={() => pauseProject(p.id, false)}>▶ Resume</button>
-                        : pausable && <button className="mini" title="Pause all autonomous marketing for this app" onClick={() => pauseProject(p.id, true)}>⏸ Pause</button>}
-                      <button className="mini danger" title="Delete this app and all its data" onClick={() => deleteProject(p.id, p.title)}>🗑</button>
-                    </div>
-                  </div>
-                  <div className="d">{p.summary || p.prompt}</div>
-                  <div className="foot">
-                    <PhaseChip phase={p.phase} />
-                    {paused && <span className="paused-tag">paused</span>}
-                    <span>{(p.jobs?.length || 0)} job{(p.jobs?.length || 0) === 1 ? '' : 's'} · {ago(p.updated_at)}</span>
-                  </div>
-                </div>
-                );
-              })}
-            </div>
-          )}
+        <div className="side-foot">
+          <button className={`connect ${auth?.connected ? 'on' : 'off'}`} onClick={() => setShowConnect(true)}>
+            <span className="pip" />{auth?.connected ? 'Claude connected' : 'Connect Claude'}
+          </button>
         </div>
-      </div>
+      </aside>
+
+      <main className="main">
+        {notice && <div className="banner ok">{notice}</div>}
+        {error && <div className="banner">{error}</div>}
+
+        {currentId === null ? (
+          <div className="main-center"><Hero onSubmit={onSubmit} /></div>
+        ) : currentId === 'all' ? (
+          <>
+            <div className="main-head"><div><h1>All apps</h1><div className="note">A single view across everything you’re marketing.</div></div></div>
+            {projects.length ? <GodView projects={projects as any} onOpen={(id) => { setCurrentId(id); setView('dashboard'); }} /> : <div className="empty">Nothing yet — click ＋ New app to start.</div>}
+          </>
+        ) : !detail ? (
+          <div className="empty">Loading…</div>
+        ) : (
+          <>
+            <div className="main-head">
+              <div><h1>{detail.project.title} <PhaseChip phase={detail.project.phase} /></h1></div>
+              <div className="main-head-actions">
+                {detail.campaign?.status === 'paused'
+                  ? <button className="mini" onClick={() => pauseProject(detail.project.id, false)}>▶ Resume</button>
+                  : (detail.campaign?.status === 'active' || detail.jobs.some((j) => j.live)) && <button className="mini" onClick={() => pauseProject(detail.project.id, true)}>⏸ Pause</button>}
+                <button className="mini danger" onClick={() => deleteProject(detail.project.id, detail.project.title)}>🗑 Delete</button>
+              </div>
+            </div>
+            <AgentsWorking jobs={detail.jobs} />
+
+            {view === 'dashboard' && <Dashboard detail={detail as any} />}
+
+            {view === 'queue' && (
+              <>
+                <DirectionBox directives={detail.directives || []} onAdd={addDirection} />
+                <CompetitivePanel
+                  analyzed={detail.findings.filter((f) => f.category === 'competitor').length}
+                  files={detail.files.filter((f) => /competitive/i.test(f.name))}
+                  live={detail.jobs.some((j) => j.kind === 'competitive' && j.live)}
+                  onRun={runCompetitors}
+                />
+                {detail.campaign ? (
+                  <CampaignPanel
+                    campaign={detail.campaign} actions={detail.actions}
+                    onDecide={decide} onRevise={revise} onOptimize={optimize} onGenerate={generate}
+                    onOpenChannels={() => setShowChannels(true)} onOpenLists={() => setShowLists(true)} onOpenAdImages={() => setShowAdImages(true)}
+                    onCampaignAction={campaignAction} onAdControl={adControl}
+                    lists={detail.lists || []} anyExecLive={detail.jobs.some((j) => j.phase === 'execution' && j.live)}
+                  />
+                ) : ['marketing', 'done'].includes(detail.project.phase) && !detail.jobs.some((j) => j.live) ? (
+                  <div className="launch-cta">
+                    <div>
+                      <div className="lc-title">🚀 Ready to execute</div>
+                      <div className="note">Research and the marketing plan are done. Launch the growth swarm to start proposing real actions — within a budget you set (even $0).</div>
+                    </div>
+                    <button className="submit" onClick={() => setShowLaunch(true)}>Launch growth campaign →</button>
+                  </div>
+                ) : (
+                  <div className="empty">Research is underway — the marketing plan and campaign options appear here once it’s done. Watch progress under <b>Agents & activity</b>.</div>
+                )}
+              </>
+            )}
+
+            {view === 'agents' && (
+              <div className="jobs">
+                {detail.jobs.map((j) => <JobCard key={j.id} job={j} onOpen={() => setModalJobId(j.id)} onControl={control} />)}
+                {detail.jobs.length === 0 && <div className="empty">No agents have run yet.</div>}
+              </div>
+            )}
+          </>
+        )}
+      </main>
 
       {modalJob && detail && (
-        <JobModal
-          job={modalJob}
-          findings={detail.findings.filter((f) => f.job_id === modalJob.id)}
-          files={detail.files.filter((f) => f.job_id === modalJob.id)}
-          onClose={() => setModalJobId(null)}
-        />
+        <JobModal job={modalJob} findings={detail.findings.filter((f) => f.job_id === modalJob.id)} files={detail.files.filter((f) => f.job_id === modalJob.id)} onClose={() => setModalJobId(null)} />
       )}
       {showConnect && <ConnectModal auth={auth} onClose={() => setShowConnect(false)} reload={loadAuth} />}
-      {showChannels && currentId && <ChannelsModal projectId={currentId} onClose={() => setShowChannels(false)} hasCampaign={!!detail?.campaign} hasProject={!!currentId} onCreate={createAccount} />}
-      {showLaunch && detail && currentId && <LaunchModal projectId={currentId} onClose={() => setShowLaunch(false)} onLaunch={launchCampaign} />}
-      {showLists && currentId && <EmailListsModal projectId={currentId} onClose={() => setShowLists(false)} onChanged={() => currentId && loadDetail(currentId)} />}
-      {showAdImages && currentId && <AdImagesModal projectId={currentId} onClose={() => setShowAdImages(false)} />}
-    </>
+      {showChannels && appId && <ChannelsModal projectId={appId} onClose={() => setShowChannels(false)} hasCampaign={!!detail?.campaign} hasProject={!!appId} onCreate={createAccount} />}
+      {showLaunch && detail && appId && <LaunchModal projectId={appId} onClose={() => setShowLaunch(false)} onLaunch={launchCampaign} />}
+      {showLists && appId && <EmailListsModal projectId={appId} onClose={() => setShowLists(false)} onChanged={() => appId && loadDetail(appId)} />}
+      {showAdImages && appId && <AdImagesModal projectId={appId} onClose={() => setShowAdImages(false)} />}
+    </div>
   );
 }
 

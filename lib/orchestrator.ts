@@ -3,7 +3,7 @@ import {
   listFindings, listAllActiveJobs, createCampaign, getCampaign, getCampaignByProject,
   updateCampaign, getAction, updateAction, reserveSpend, refundSpend, resetStaleRevisions,
   addFunds, removeFunds, setSpend, listActions, getConnector, listActiveCampaigns,
-  scheduleAction, dueScheduledActions, analyzedCompetitors,
+  scheduleAction, dueScheduledActions, analyzedCompetitors, recordDailyMetric,
   type Job, type ActionRow, type Campaign,
 } from './db';
 import { emitEvent } from './events';
@@ -594,7 +594,7 @@ export async function runAdOptimizer(projectId: string): Promise<AdSyncResult> {
   const liveAds = listActions(c.id).filter((x) => x.kind === 'ad' && x.status === 'done');
   const issues: string[] = [];
   if (!liveAds.length) { emitEvent({ type: 'project', projectId }); return { ok: true, liveAds: 0, synced: 0, spentCents: c.spent_cents, issues }; }
-  let total = 0;
+  let total = 0, totInstalls = 0, totClicks = 0, totImpr = 0;
   let synced = 0;
   const disconnected = new Set<string>();
   for (const a of liveAds) {
@@ -610,6 +610,7 @@ export async function runAdOptimizer(projectId: string): Promise<AdSyncResult> {
     catch (e: any) { issues.push(`${channelDef(a.channel).label}: ${String(e?.message || e).slice(0, 200)}`); continue; }
     synced++;
     total += ins.spendCents;
+    totInstalls += ins.conversions || 0; totClicks += ins.clicks || 0; totImpr += ins.impressions || 0;
     if (m.ad_paused) continue; // already off — counted for spend, skip judgement
     // Evaluate this ad. CTR = clicks / impressions.
     const ctr = ins.impressions > 0 ? ins.clicks / ins.impressions : 0;
@@ -642,6 +643,7 @@ export async function runAdOptimizer(projectId: string): Promise<AdSyncResult> {
   }
   if (synced > 0) {
     setSpend(c.id, total);
+    recordDailyMetric(c.id, { spend_cents: total, installs: totInstalls, clicks: totClicks, impressions: totImpr }); // trend history
     if (c.budget_cents > 0 && total >= c.budget_cents) await setKillSwitch(projectId, true); // hard stop at the cap
   }
   if (disconnected.size) issues.unshift(`${[...disconnected].join(', ')} ${disconnected.size === 1 ? 'is' : 'are'} not connected — reconnect under ⚙ Channels to sync real spend.`);
